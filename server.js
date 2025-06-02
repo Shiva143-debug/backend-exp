@@ -104,7 +104,7 @@ app.post("/login", (req, res) => {
       console.log(result.rows.length)
         if (!result || result.rows.length === 0) {
             // No matching user found
-            return res.status(401).json({ error: "Invalid email or password" });
+            return res.status(401).json({ error: "Invalid email or password", message: "Login Failure" });
         }
 
         const user = result.rows[0];
@@ -112,7 +112,7 @@ app.post("/login", (req, res) => {
         console.log(password)
         if (user.password !== password) {
             // Password doesn't match
-            return res.status(401).json({ error: "Invalid email or password" });
+            return res.status(401).json({ error: "Invalid email or password" , message: "Login Failure"});
         }
 
         // Login successful
@@ -287,8 +287,6 @@ app.post("/addSavings", (req, res) => {
     })
 })
 
-
-
 app.post("/adddefaultsource", (req, res) => {
     const {id, sourceName } = req.body;
     console.log("Received data:", req.body);
@@ -302,7 +300,6 @@ app.post("/adddefaultsource", (req, res) => {
         return res.json(result)
     })
 })
-
 
 // Update source
 app.put("/updateSource/:id", (req, res) => {
@@ -324,7 +321,6 @@ app.put("/updateSource/:id", (req, res) => {
         return res.json({ message: "Source updated successfully", result });
     });
 });
-
 
 app.post("/postExpenseData", (req, res) => {
     const {id, category, product, cost, p_date, description, is_tax_app, percentage, tax_amount,image } = req.body;
@@ -349,7 +345,6 @@ app.post("/postExpenseData", (req, res) => {
 
     })
 })
-
 
 app.put("/updateExpense/:id", (req, res) => {
     const { id } = req.params;
@@ -417,6 +412,16 @@ app.get('/categories/:id', (req, res) => {
         return res.json(data.rows);
     });
 });
+
+app.get('/savings/:id', (req, res) => {
+    const user_id = req.params.id;
+    const sql = `SELECT * FROM savings WHERE user_id = ${user_id} order by date desc`;
+    pool.query(sql, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data.rows);
+    });
+});
+
 
 app.get('/getSource/:id/:month/:year', (req, res) => {
     const user_id = req.params.id;
@@ -552,7 +557,6 @@ app.get('/getExpenseCostByItemId/:id/:itemId', (req, res) => {
     })
 })
 
-
 app.get('/getPhoto/:id', (req, res) => {
 
     const id = req.params.id;
@@ -575,7 +579,6 @@ app.get('/getCategoriesAndProducts/:id', (req, res) => {
     });
 });
 
-
 app.get('/getdefaultsources/:id', (req, res) => {
     const user_id = req.params.id;
     const sql = `SELECT * FROM sources WHERE user_id = ${user_id} or user_id = 0`;
@@ -584,7 +587,6 @@ app.get('/getdefaultsources/:id', (req, res) => {
         return res.json(data.rows);
     });
 });
-
 
 app.get('/getCategories/:id', (req, res) => {
     const user_id = req.params.id;
@@ -650,6 +652,7 @@ app.delete('/deleteExpence/:item_id/:user_id', (req, res) => {
 app.delete('/deleteSource/:item_id/:user_id', (req, res) => {
   const item_id = parseInt(req.params.item_id);
   const user_id = parseInt(req.params.user_id);
+   console.log(item_id,user_id)
 
   // const sql = "DELETE FROM items1 WHERE `itemId`=?";
   const sql = "DELETE FROM source WHERE id=$1 AND user_id=$2";
@@ -663,6 +666,25 @@ app.delete('/deleteSource/:item_id/:user_id', (req, res) => {
   });
 
 });
+
+app.delete('/savings/:item_id/:user_id', (req, res) => {
+  const item_id = parseInt(req.params.item_id);
+  const user_id = parseInt(req.params.user_id);
+  console.log(item_id,user_id)
+
+  // const sql = "DELETE FROM items1 WHERE `itemId`=?";
+  const sql = "DELETE FROM savings WHERE id=$1 AND user_id=$2";
+  pool.query(sql, [item_id,user_id], (err, data) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ message: 'Internal Server Error' });
+    }
+
+    return res.json(data);
+  });
+
+});
+
 
 app.put('/updateUserPassword', (req, res) => {
   const { email, updatedpassword,updatedConfirmpassword } = req.body;
