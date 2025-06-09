@@ -124,6 +124,7 @@ app.post("/login", (req, res) => {
 
 app.post("/addshopcategory", (req, res) => {
     const { id, category } = req.body;
+    console.log("category",category)
     const sqlSelect = "SELECT * FROM category WHERE user_id = $1 AND category = $2";
     const sqlInsert = "INSERT INTO category (user_id, category) VALUES ($1, $2)";
     // const sqlUpdate = "UPDATE category SET category = $2 WHERE user_id = $1 AND category = $2";
@@ -271,14 +272,14 @@ app.post("/addSource", (req, res) => {
 app.post("/addSavings", (req, res) => {
     const {id, amount, date,note } = req.body;
     console.log("Received data:", req.body);
-    // const dateObject = new Date(date);
-    // const Month = dateObject.getMonth() + 1;
-    // const Year = dateObject.getFullYear();
-    // console.log(Month)
-    // console.log(Year)
+    const dateObject = new Date(date);
+    const Month = dateObject.getMonth() + 1;
+    const Year = dateObject.getFullYear();
+    console.log(Month)
+    console.log(Year)
 
-    const sql = "INSERT INTO savings (user_id, amount, date,note) VALUES ($1,$2,$3,$4)";
-    const values = [id,amount, date,note];
+    const sql = "INSERT INTO savings (user_id, amount, date,note,month,year) VALUES ($1,$2,$3,$4,$5,$6)";
+    const values = [id,amount, date,note,Month,Year];
     console.log(values)
 
     pool.query(sql, values, (err, result) => {
@@ -440,6 +441,23 @@ app.get('/getSource/:id/:month/:year', (req, res) => {
     })
 })
 
+app.get('/getSavings/:id/:month/:year', (req, res) => {
+    const user_id = req.params.id;
+    const month = parseInt(req.params.month);
+    const year = parseInt(req.params.year);
+    console.log(month,year)
+    // const { month, year } = req.query;
+    console.log(user_id)
+    // const sql = `SELECT  * FROM source WHERE user_id = ${user_id}`;
+    const sql = `SELECT  * FROM savings WHERE user_id = $1 AND month =$2 AND year =$3`;
+    pool.query(sql, [user_id, month, year] ,(err, data) => {
+        // console.log(err);
+        // console.log(data);
+        if (err) return res.json(err);
+        return res.json(data.rows)
+    })
+})
+
 app.get('/getReportSource/:id/', (req, res) => {
     const user_id = req.params.id; 
     // const { month, year } = req.query;
@@ -491,6 +509,20 @@ app.get('/getYearWiseExpenceData/:id/:year', (req, res) => {
     pool.query(sql, (err, data) => {
         // console.log(err);
         // console.log(data);
+        if (err) return res.json(err);
+        return res.json(data.rows)
+    })
+})
+
+app.get('/getYearWiseSavingsData/:id/:year', (req, res) => {
+    const user_id = req.params.id;
+    const year = parseInt(req.params.year)
+    console.log("user_id",user_id)
+   console.log("year",year)
+    const sql = `SELECT * FROM savings  WHERE user_id = ${user_id} And year= ${year}`;
+    pool.query(sql, (err, data) => {
+        console.log(err);
+        console.log(data);
         if (err) return res.json(err);
         return res.json(data.rows)
     })
