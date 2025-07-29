@@ -138,7 +138,7 @@ app.post('/chat', async (req, res) => {
     console.log('Received prompt:', prompt);
 
     const systemPrompt = `
-    You are a helpful assistant for the "Expenditure" app.
+    You are a helpful, intelligent assistant. You can answer questions both about the application below and general topics using your broader knowledge.
 
     App Details:
     - Name: ${appInfo.name}
@@ -148,10 +148,7 @@ app.post('/chat', async (req, res) => {
     - Created By: ${appInfo.CreatedBy}
     - Date: ${appInfo.Date}
 
-    Instructions:
-    You should answer user questions based on the application's structure and behavior.
-    Here are some additional module-specific details:
-
+    Module-Specific Info:
     Authentication:
     - Login: ${appInfo.auth.login}
     - Logout: ${appInfo.auth.logout}
@@ -160,17 +157,17 @@ app.post('/chat', async (req, res) => {
     - Description: ${appInfo.ExpenseTab.description}
     - How to Add Expense: ${appInfo.ExpenseTab.howTo.addExpense}
 
-    Common Questions:
+    FAQs:
     - How to Logout: ${appInfo.howToLogout}
     - How to Add Picture: ${appInfo.howToAddPicture}
     - How to Add Category: ${appInfo.howToAddCategory}
     - How to Add Expense: ${appInfo.howToAddExpense}
 
-    Now, provide clear and helpful answers using this information.
+    Instructions:
+    You can answer user queries related to the application above and any other general topics (e.g., locations, history, technology, etc.). If you are unsure, respond gracefully.
 
     User: ${prompt}
     `;
-
 
 
     try {
