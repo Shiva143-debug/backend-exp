@@ -1,0 +1,39 @@
+{
+  "name": "Expenditure",
+  "description": "Expenditure is a personal finance tracker that helps users manage their income and expenses effectively. It provides a simple and intuitive interface to add income sources, track expenses, and generate detailed reports categorized by income, expense, and categories. It also supports theme toggling like dark mode.",
+  "features": [
+    "Dark mode toggle (located in Header)",
+    "Add income with date (in Source tab)",
+    "Add and manage expenses",
+    "View reports based on income, expenses, and categories (in Reports tab)",
+    "Responsive and clean UI",
+    "Data visualization using charts",
+    "User-friendly navigation with Sidebar and Header",
+    "Real-time data updates"
+  ],
+  "techStack": [
+    "React.js",
+    "Node.js",
+    "Express.js",
+    "MySQL",
+    "PrimeReact",
+    "Tailwind CSS",
+    "Axios"
+  ],
+  "CreatedBy": "shiva shankara prasad Ramagiri",
+  "Date": "2025-07-29",
+  "auth": {
+    "login": "Users must log in with a username and password.",
+    "logout": "Logout is accessible from the top-right profile/settings icon."
+  },
+  "ExpenseTab": {
+    "description": "Module for logging daily expenses with amount, category, and date.",
+    "howTo": {
+      "addExpense": "Go to the 'Expense' tab, input the amount, select a category and date, and click 'Add'."
+    }
+  },
+  "howToLogout": "Click on the user icon or settings dropdown at the top-right and select 'Logout' to exit the session.",
+  "howToAddPicture": "While adding an expense or income, use the upload button to attach a relevant image (like receipts).",
+  "howToAddCategory": "Navigate to the 'Categories' section (if available) and click on 'Add New Category' to create custom categories for your expenses.",
+  "howToAddExpense": "Go to the 'Expense' section, input the amount, category, and date, then click 'Add' to save the expense."
+}

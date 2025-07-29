@@ -5,26 +5,23 @@ const bodyParser = require('body-parser');
 const multer = require('multer')
 const upload = multer({ dest: 'uploads/' });
 const nodemailer = require('nodemailer');
+require('dotenv').config();
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const appInfo = require('./appInfo.json');
 
 const app = express()
 app.use(cors())
 app.use(express.json())
 app.use(bodyParser.json());
 
-// const pool = mysql.createConnection({
-//     host: "148.72.246.179",
-//     user: "shaik",
-//     password: "",
-//     database: 'test'
-// })
 
 const pool = new Pool({
-    user: 'oss_admin',
-    host: '148.72.246.179',
-    database: 'expense',
-    password: 'Latitude77',
-    schema:"public",
-    port: '5432', 
+  user: process.env.PG_USER,
+  host: process.env.PG_HOST,
+  database: process.env.PG_DATABASE,
+  password: process.env.PG_PASSWORD,
+  port: process.env.PG_PORT,
+  schema: process.env.PG_SCHEMA
 });
 
 const transporter = nodemailer.createTransport({
@@ -34,6 +31,11 @@ const transporter = nodemailer.createTransport({
       pass: 'sdjb lfai xtyx osrx'
     }
   });
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+console.log("Gemini API Key being used:", process.env.GEMINI_API_KEY ? "✅ Loaded" : "❌ Missing");
+
 
 app.post("/register", (req, res) => {
     const { full_name, email, mobile_no, address } = req.body;
@@ -121,6 +123,68 @@ app.post("/login", (req, res) => {
       
     });
 });
+
+app.post('/chat', async (req, res) => {
+    const { prompt } = req.body;
+    console.log('Received prompt:', prompt);
+
+    const systemPrompt = `
+    You are a helpful assistant for the "Expenditure" app.
+
+    App Details:
+    - Name: ${appInfo.name}
+    - Description: ${appInfo.description}
+    - Features: ${appInfo.features.join(', ')}
+    - Tech Stack: ${appInfo.techStack.join(', ')}
+    - Created By: ${appInfo.CreatedBy}
+    - Date: ${appInfo.Date}
+
+    Instructions:
+    You should answer user questions based on the application's structure and behavior.
+    Here are some additional module-specific details:
+
+    Authentication:
+    - Login: ${appInfo.auth.login}
+    - Logout: ${appInfo.auth.logout}
+
+    Expense Module:
+    - Description: ${appInfo.ExpenseTab.description}
+    - How to Add Expense: ${appInfo.ExpenseTab.howTo.addExpense}
+
+    Common Questions:
+    - How to Logout: ${appInfo.howToLogout}
+    - How to Add Picture: ${appInfo.howToAddPicture}
+    - How to Add Category: ${appInfo.howToAddCategory}
+    - How to Add Expense: ${appInfo.howToAddExpense}
+
+    Now, provide clear and helpful answers using this information.
+
+    User: ${prompt}
+    `;
+
+
+
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        console.log('Using model:', model.name);
+        const result = await model.generateContent(systemPrompt);
+        const response = await result.response;
+        const text = response.text();
+
+        console.log('Response from Gemini:', text);
+        res.send({ message: text });
+
+    } catch (error) {
+        if (error.status === 429) {
+            res.status(429).send("Rate limit hit. Try again later or upgrade your Gemini API plan.");
+        } else {
+            res.status(500).send("Something went wrong: " + error.message);
+        }
+        // console.error('Error during Gemini API call:', error);
+        // res.status(500).send({ error: 'Something went wrong with Gemini API.' });
+    }
+});
+
 
 app.post("/addshopcategory", (req, res) => {
     const { id, category } = req.body;
