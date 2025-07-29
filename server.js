@@ -16,14 +16,23 @@ app.use(bodyParser.json());
 
 
 const pool = new Pool({
-  user: process.env.PG_USER,
-  host: process.env.PG_HOST,
-  database: process.env.PG_DATABASE,
-  password: process.env.PG_PASSWORD,
-  port: process.env.PG_PORT,
-  schema: process.env.PG_SCHEMA
+    user: 'oss_admin',
+    host: '148.72.246.179',
+    database: 'expense',
+    password: 'Latitude77',
+    schema:"public",
+    port: '5432', 
 });
 
+
+// const pool = new Pool({
+//   user: process.env.PG_USER,
+//   host: process.env.PG_HOST,
+//   database: process.env.PG_DATABASE,
+//   password: process.env.PG_PASSWORD,
+//   schema: process.env.PG_SCHEMA,
+//   port: process.env.PG_PORT
+// });
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
