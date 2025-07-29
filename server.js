@@ -41,7 +41,7 @@ const transporter = nodemailer.createTransport({
     }
   });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI("AIzaSyDWxhXDe4CFJy01gt2lmJHGrEw8zT2ocNA");
 
 console.log("Gemini API Key being used:", process.env.GEMINI_API_KEY ? "✅ Loaded" : "❌ Missing");
 
