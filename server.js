@@ -54,15 +54,6 @@ const pool = new Pool({
 //   schema: process.env.PG_SCHEMA,
 //   port: process.env.PG_PORT
 // });
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: 'shivarama99666@gmail.com',
-        pass: 'sdjb lfai xtyx osrx'
-    }
-});
-
-// const genAI = new GoogleGenerativeAI("AIzaSyDWxhXDe4CFJy01gt2lmJHGrEw8zT2ocNA");
 const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY, // from your .env
 });
@@ -140,7 +131,6 @@ app.use("/", categoryRoutes(pool));
 //   }
 // });
 
-const sendMail = require("./mailer"); // the file we just created
 
 async function sendMail(to, subject, text) {
   try {
@@ -289,7 +279,7 @@ app.post('/chat', async (req, res) => {
 
 
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
         console.log('Using model:', model.name);
         const result = await model.generateContent(systemPrompt);
         const response = await result.response;
