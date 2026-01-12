@@ -64,68 +64,69 @@ app.use('/', agentRoutesNew(ai, pool));
 app.use("/", categoryRoutes(pool));
 
 
-app.post("/register", (req, res) => {
+app.post("/register", async (req, res) => {
   const { full_name, email, mobile_no, address } = req.body;
-
   const password = Math.floor(100000 + Math.random() * 900000).toString();
 
-  const checkDuplicateEmailQuery =
-    "SELECT COUNT(*) AS count FROM register WHERE email = $1";
+  const client = await pool.connect();
 
-  const insertQuery =
-    "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1, $2, $3, $4, $5)";
+  try {
+    // 🔹 Check duplicate email
+    const dupCheck = await client.query(
+      "SELECT 1 FROM register WHERE email = $1",
+      [email]
+    );
 
-  pool.query(checkDuplicateEmailQuery, [email], (err, result) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({
-        success: false,
-        message: "Error checking email"
-      });
-    }
-
-    if (Number(result.rows[0].count) > 0) {
+    if (dupCheck.rowCount > 0) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists. Please use a different email address."
+        message: "Email already exists"
       });
     }
 
-    const values = [full_name, email, mobile_no, address, password];
+    // 🔹 Begin transaction
+    await client.query("BEGIN");
 
-    pool.query(insertQuery, values, (insertErr) => {
-      if (insertErr) {
-        console.error(insertErr);
-        return res.status(500).json({
-          success: false,
-          message: "Error creating account"
-        });
-      }
+    // 🔹 Insert user
+    await client.query(
+      "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1, $2, $3, $4, $5)",
+      [full_name, email, mobile_no, address, password]
+    );
 
-      const mailOptions = {
-        from: 'shivarama99666@gmail.com',
-        to: email,
-        subject: 'Your Password for Registration',
-        text: `Dear ${full_name}, your password is ${password}`
-      };
+    // 🔹 Prepare email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Your Password for Registration",
+      text: `Dear ${full_name}, your password is ${password}`
+    };
 
-      transporter.sendMail(mailOptions, (mailErr) => {
-        if (mailErr) {
-          console.error(mailErr);
-          return res.status(500).json({
-            success: false,
-            message: "Account created but email failed"
-          });
-        }
+    // 🔹 Send email
+    await transporter.sendMail(mailOptions);
 
-        return res.json({
-          success: true,
-          message: "Registration successful. Password sent to your email."
-        });
-      });
+    // ✅ Commit ONLY if email succeeds
+    await client.query("COMMIT");
+
+    return res.json({
+      success: true,
+      message: "Registration successful. Password sent to email."
     });
-  });
+
+  } catch (err) {
+    // ❌ Rollback on ANY failure
+    await client.query("ROLLBACK");
+    console.error("Register error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Registration failed. Please try again."
+    });
+
+  } finally {
+    client.release();
+  }
 });
+
 
 
 app.post("/login", (req, res) => {
