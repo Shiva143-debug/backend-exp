@@ -9,7 +9,20 @@ require('dotenv').config();
 // const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { GoogleGenAI } = require('@google/genai');
 const appInfo = require('./appInfo.json');
+const { google } = require("googleapis");
 
+const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const REDIRECT_URI = "https://developers.google.com/oauthplayground";
+const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
+
+const oAuth2Client = new google.auth.OAuth2(
+    CLIENT_ID,
+    CLIENT_SECRET,
+    REDIRECT_URI
+);
+
+oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
 const incomeRoutes = require('./routes/incomeRoutes');
 const savingsRoutes = require('./routes/savingsRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
@@ -64,69 +77,141 @@ app.use('/', agentRoutesNew(ai, pool));
 app.use("/", categoryRoutes(pool));
 
 
-app.post("/register", async (req, res) => {
-  const { full_name, email, mobile_no, address } = req.body;
-  const password = Math.floor(100000 + Math.random() * 900000).toString();
+// app.post("/register", async (req, res) => {
+//   const { full_name, email, mobile_no, address } = req.body;
+//   const password = Math.floor(100000 + Math.random() * 900000).toString();
 
-  const client = await pool.connect();
+//   const client = await pool.connect();
 
+//   try {
+//     // 🔹 Check duplicate email
+//     const dupCheck = await client.query(
+//       "SELECT 1 FROM register WHERE email = $1",
+//       [email]
+//     );
+
+//     if (dupCheck.rowCount > 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Email already exists"
+//       });
+//     }
+
+//     // 🔹 Begin transaction
+//     await client.query("BEGIN");
+
+//     // 🔹 Insert user
+//     await client.query(
+//       "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1, $2, $3, $4, $5)",
+//       [full_name, email, mobile_no, address, password]
+//     );
+
+//     // 🔹 Prepare email
+//     const mailOptions = {
+//       from: process.env.EMAIL_USER,
+//       to: email,
+//       subject: "Your Password for Registration",
+//       text: `Dear ${full_name}, your password is ${password}`
+//     };
+
+//     // 🔹 Send email
+//     await transporter.sendMail(mailOptions);
+
+//     // ✅ Commit ONLY if email succeeds
+//     await client.query("COMMIT");
+
+//     return res.json({
+//       success: true,
+//       message: "Registration successful. Password sent to email."
+//     });
+
+//   } catch (err) {
+//     // ❌ Rollback on ANY failure
+//     await client.query("ROLLBACK");
+//     console.error("Register error:", err);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Registration failed. Please try again."
+//     });
+
+//   } finally {
+//     client.release();
+//   }
+// });
+
+const sendMail = require("./mailer"); // the file we just created
+
+async function sendMail(to, subject, text) {
   try {
-    // 🔹 Check duplicate email
-    const dupCheck = await client.query(
-      "SELECT 1 FROM register WHERE email = $1",
-      [email]
-    );
+    const accessToken = await oAuth2Client.getAccessToken();
 
-    if (dupCheck.rowCount > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already exists"
-      });
-    }
-
-    // 🔹 Begin transaction
-    await client.query("BEGIN");
-
-    // 🔹 Insert user
-    await client.query(
-      "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1, $2, $3, $4, $5)",
-      [full_name, email, mobile_no, address, password]
-    );
-
-    // 🔹 Prepare email
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Your Password for Registration",
-      text: `Dear ${full_name}, your password is ${password}`
-    };
-
-    // 🔹 Send email
-    await transporter.sendMail(mailOptions);
-
-    // ✅ Commit ONLY if email succeeds
-    await client.query("COMMIT");
-
-    return res.json({
-      success: true,
-      message: "Registration successful. Password sent to email."
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        type: "OAuth2",
+        user: process.env.EMAIL_FROM, // your Gmail address
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        refreshToken: REFRESH_TOKEN,
+        accessToken: accessToken.token,
+      },
     });
 
-  } catch (err) {
-    // ❌ Rollback on ANY failure
-    await client.query("ROLLBACK");
-    console.error("Register error:", err);
+    const mailOptions = { from: process.env.EMAIL_FROM, to, subject, text };
 
-    return res.status(500).json({
-      success: false,
-      message: "Registration failed. Please try again."
-    });
-
-  } finally {
-    client.release();
+    const result = await transporter.sendMail(mailOptions);
+    return result;
+  } catch (error) {
+    console.error("Error sending mail:", error);
+    throw error;
   }
-});
+}
 
+
+app.post("/register", async (req, res) => {
+    const { full_name, email, mobile_no, address } = req.body;
+    const password = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const client = await pool.connect();
+
+    try {
+        const dupCheck = await client.query(
+            "SELECT 1 FROM register WHERE email = $1",
+            [email]
+        );
+        if (dupCheck.rowCount > 0)
+            return res.status(400).json({ success: false, message: "Email exists" });
+
+        await client.query("BEGIN");
+        await client.query(
+            "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1,$2,$3,$4,$5)",
+            [full_name, email, mobile_no, address, password]
+        );
+
+        // Send email via OAuth2
+        await sendMail(
+            email,
+            "Your Password for Registration",
+            `Dear ${full_name}, your password is ${password}`
+        );
+
+        await client.query("COMMIT");
+
+        return res.json({
+            success: true,
+            message: "Registration successful. Password sent to email.",
+        });
+    } catch (err) {
+        await client.query("ROLLBACK");
+        console.error("Register error:", err);
+        return res
+            .status(500)
+            .json({ success: false, message: "Registration failed" });
+    } finally {
+        client.release();
+    }
+});
 
 
 app.post("/login", (req, res) => {
