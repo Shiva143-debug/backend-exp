@@ -41,15 +41,6 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-
-// const pool = new Pool({
-//   user: process.env.PG_USER,
-//   host: process.env.PG_HOST,
-//   database: process.env.PG_DATABASE,
-//   password: process.env.PG_PASSWORD,
-//   schema: process.env.PG_SCHEMA,
-//   port: process.env.PG_PORT
-// });
 const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY, // from your .env
 });
@@ -62,70 +53,6 @@ app.use('/', savingsRoutes(pool));
 app.use('/', expenseRoutes(pool, upload));
 app.use('/', agentRoutesNew(ai, pool));
 app.use("/", categoryRoutes(pool));
-
-
-// app.post("/register", async (req, res) => {
-//   const { full_name, email, mobile_no, address } = req.body;
-//   const password = Math.floor(100000 + Math.random() * 900000).toString();
-
-//   const client = await pool.connect();
-
-//   try {
-//     // 🔹 Check duplicate email
-//     const dupCheck = await client.query(
-//       "SELECT 1 FROM register WHERE email = $1",
-//       [email]
-//     );
-
-//     if (dupCheck.rowCount > 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Email already exists"
-//       });
-//     }
-
-//     // 🔹 Begin transaction
-//     await client.query("BEGIN");
-
-//     // 🔹 Insert user
-//     await client.query(
-//       "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1, $2, $3, $4, $5)",
-//       [full_name, email, mobile_no, address, password]
-//     );
-
-//     // 🔹 Prepare email
-//     const mailOptions = {
-//       from: process.env.EMAIL_USER,
-//       to: email,
-//       subject: "Your Password for Registration",
-//       text: `Dear ${full_name}, your password is ${password}`
-//     };
-
-//     // 🔹 Send email
-//     await transporter.sendMail(mailOptions);
-
-//     // ✅ Commit ONLY if email succeeds
-//     await client.query("COMMIT");
-
-//     return res.json({
-//       success: true,
-//       message: "Registration successful. Password sent to email."
-//     });
-
-//   } catch (err) {
-//     // ❌ Rollback on ANY failure
-//     await client.query("ROLLBACK");
-//     console.error("Register error:", err);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Registration failed. Please try again."
-//     });
-
-//   } finally {
-//     client.release();
-//   }
-// });
 
 
 async function sendMail(to, subject, text) {
