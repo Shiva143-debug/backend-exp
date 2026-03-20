@@ -37,12 +37,8 @@ app.use(bodyParser.json());
 
 
 const pool = new Pool({
-    user: 'oss_admin',
-    host: '148.72.246.179',
-    database: 'expense',
-    password: 'Latitude77',
-    schema: "public",
-    port: '5432',
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
 
