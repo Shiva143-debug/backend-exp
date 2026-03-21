@@ -278,7 +278,45 @@ app.put('/updateUserPassword', (req, res) => {
     });
 });
 
+app.post('/create-payment', async (req, res) => {
+    const { name, amount, transaction } = req.body;
 
+    try {
+        // Create a PaymentIntent with the payment method ID
+        // const paymentIntent = await stripe.paymentIntents.create({
+        //     amount: amount * 100, // amount in cents
+        //     currency: 'usd',
+        //     payment_method: 'card',
+        //     confirmation_method: 'manual',
+        //     confirm: true,
+        // });
+
+        // If paymentIntent is successful, insert data into the payment table
+        const sql = "INSERT INTO payment (name,amount,transaction) VALUES ($1, $2, $3)";
+        const values = [name, amount, transaction];
+        console.log("Inserting values into payment table:", values);
+
+        pool.query(sql, values, (err, result) => {
+            if (err) {
+                console.error("Error inserting data into payment table:", err);
+                return res.status(500).json({ error: "Error inserting data into payment table" });
+            }
+            console.log("Data inserted successfully into payment table");
+            return res.json({ success: true, message: "Data inserted successfully" });
+        });
+    } catch (error) {
+        console.error("Error creating PaymentIntent:", error);
+        return res.status(500).json({ error: "Error creating PaymentIntent" });
+    }
+});
+
+app.get('/getpayment', (req, res) => {
+    const sql = "SELECT  * FROM payment";
+    pool.query(sql, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data.rows);
+    });
+});
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log('server on', PORT));
