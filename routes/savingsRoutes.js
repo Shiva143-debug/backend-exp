@@ -1,22 +1,21 @@
-// routes/savingsRoutes.js
 const express = require('express');
 
 module.exports = function savingsRoutes(pool) {
   const router = express.Router();
 
   // GET ALL SAVINGS (mobile app)
-  router.get('/get-savings/:userId', (req, res) => {
-    const userId = req.params.userId;
-    const sql = `SELECT * FROM savings WHERE user_id = ${userId} order by date desc`;
-    pool.query(sql, (err, data) => {
+  router.get('/get-savings', (req, res) => {
+    const userId = req.user.id;
+    const sql = `SELECT * FROM savings WHERE user_id = $1 order by date desc`;
+    pool.query(sql, [userId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
     });
   });
 
   // GET SAVINGS BY MONTH/YEAR (mobile app)
-  router.get('/get-savings-by-month-year/:userId/:month/:year', (req, res) => {
-    const userId = req.params.userId;
+  router.get('/get-savings-by-month-year/:month/:year', (req, res) => {
+    const userId = req.user.id;
     const month = parseInt(req.params.month);
     const year = parseInt(req.params.year);
 
@@ -29,13 +28,14 @@ module.exports = function savingsRoutes(pool) {
 
   // ADD SAVINGS (mobile app)
   router.post("/add-savings", (req, res) => {
-    const { id, amount, date, note } = req.body;
+    const { amount, date, note } = req.body;
+    const userId = req.user.id;
     const dateObject = new Date(date);
     const Month = dateObject.getMonth() + 1;
     const Year = dateObject.getFullYear();
 
     const sql = "INSERT INTO savings (user_id, amount, date,note,month,year) VALUES ($1,$2,$3,$4,$5,$6)";
-    const values = [id, amount, date, note, Month, Year];
+    const values = [userId, amount, date, note, Month, Year];
 
     pool.query(sql, values, (err, result) => {
       if (err) return res.json(err);
@@ -46,12 +46,13 @@ module.exports = function savingsRoutes(pool) {
   // UPDATE SAVINGS(mobile app)
   router.put("/update-savings/:saving_id", (req, res) => {
     const { saving_id } = req.params;
-    const { id, amount, date, note } = req.body;
+    const { amount, date, note } = req.body;
+    const userId = req.user.id;
 
-    if (!id || !amount || !date) {
+    if (!amount || !date) {
       return res.status(400).json({
         success: false,
-        message: "id, amount and date are required"
+        message: "amount and date are required"
       });
     }
 
@@ -70,7 +71,7 @@ module.exports = function savingsRoutes(pool) {
     RETURNING *;
   `;
 
-    const values = [amount, date, note, month, year, saving_id, id];
+    const values = [amount, date, note, month, year, saving_id, userId];
 
     pool.query(sql, values, (err, result) => {
       if (err) {
@@ -97,9 +98,9 @@ module.exports = function savingsRoutes(pool) {
   });
 
   // DELETE SAVINGS(mobile app)
-  router.delete('/delete-saving/:savingId/:userId', (req, res) => {
+  router.delete('/delete-saving/:savingId', (req, res) => {
     const savingId = parseInt(req.params.savingId);
-    const userId = parseInt(req.params.userId);
+    const userId = req.user.id;
 
     const sql = "DELETE FROM savings WHERE id=$1 AND user_id=$2";
     pool.query(sql, [savingId, userId], (err, data) => {
@@ -111,22 +112,17 @@ module.exports = function savingsRoutes(pool) {
     });
   });
 
-
-
-
-  
   // YEAR-WISE SAVINGS
-  router.get('/getYearWiseSavingsData/:id/:year', (req, res) => {
-    const user_id = req.params.id;
+  router.get('/getYearWiseSavingsData/:year', (req, res) => {
+    const userId = req.user.id;
     const year = parseInt(req.params.year);
 
-    const sql = `SELECT * FROM savings  WHERE user_id = ${user_id} And year= ${year}`;
-    pool.query(sql, (err, data) => {
+    const sql = `SELECT * FROM savings  WHERE user_id = $1 And year= $2`;
+    pool.query(sql, [userId, year], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
     });
   });
-
 
 
   return router;

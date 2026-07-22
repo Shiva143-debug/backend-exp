@@ -1,14 +1,13 @@
-// routes/categoryRoutes.js
 const express = require("express");
 
 module.exports = function categoryRoutes(pool) {
   const router = express.Router();
 
   //GET ALL CATEGORIES(mobile app)
-  router.get("/categories/:userId", (req, res) => {
-    const userId = req.params.userId;
-    const sql = `SELECT * FROM category WHERE user_id = ${userId} or user_id =0 `;
-    pool.query(sql, (err, data) => {
+  router.get("/categories", (req, res) => {
+    const userId = req.user.id;
+    const sql = `SELECT * FROM category WHERE user_id = $1 or user_id =0 `;
+    pool.query(sql, [userId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
     });
@@ -16,29 +15,34 @@ module.exports = function categoryRoutes(pool) {
 
   //ADD CATEGORY(mobile app)
   router.post("/add-category", async (req, res) => {
-    const { userId, category } = req.body;
+    const { category } = req.body;
+    const userId = req.user.id;
+    // const trimmedCategory = category ? category.trim() : "";
+    const trimmedCategory = category.trim().replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
-    if (!userId || !category) {
+    if (!trimmedCategory) {
       return res.status(400).json({
-        message: "userId and category are required"
+        message: "category is required"
       });
     }
 
-    // ✅ normalized value
-    const normalizedCategory = category.trim().toUpperCase();
+    // const normalizedCategory = trimmedCategory.replace(/\w\S*/g, (w) =>
+    //   w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+    // );
 
     try {
       const checkSql = `
       SELECT 1 FROM category
-      WHERE user_id = $1 AND category = $2
+      WHERE (user_id = $1 OR user_id = 0) AND category ILIKE $2
     `;
 
-      const checkResult = await pool.query(checkSql, [userId, normalizedCategory]);
+      const checkResult = await pool.query(checkSql, [userId, trimmedCategory]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(409).json({
-          message: "Category already exists for this user"
-        });
+        return res.status(201).json({message: "Category already exists" });
+        // return res.json({
+        //   message: "Category already exists"
+        // });
       }
 
       const insertSql = `
@@ -47,9 +51,9 @@ module.exports = function categoryRoutes(pool) {
       RETURNING *
     `;
 
-      const insertResult = await pool.query(insertSql, [userId, normalizedCategory]);
+      const insertResult = await pool.query(insertSql, [userId, trimmedCategory]);
 
-      return res.status(201).json({
+      return res.json({
         message: "Category added successfully",
         data: insertResult.rows[0]
       });
@@ -66,32 +70,49 @@ module.exports = function categoryRoutes(pool) {
   //UPDATE CATEGORY (mobile app)
   router.put("/update-category/:categoryId", async (req, res) => {
     const { categoryId } = req.params;
-    const { oldCategory, newCategory, userId } = req.body;
+    const { oldCategory, newCategory } = req.body;
+    const userId = req.user.id;
 
-    if (!oldCategory || !newCategory || !userId) {
+    if (!oldCategory || !newCategory) {
       return res.status(400).json({
         success: false,
-        message: "oldCategory, newCategory and userId are required"
+        message: "oldCategory and newCategory are required"
       });
     }
+
+    const normalizedNewCategory = newCategory
+      .split(/[\s_-]+/)
+      .filter(word => word.length > 0)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
 
     const client = await pool.connect();
 
     try {
       await client.query("BEGIN");
-      const formattedNewCategory = newCategory.trim().toUpperCase();
 
+      const checkSql = "SELECT 1 FROM category  WHERE (user_id = $1 OR user_id = 0) AND LOWER(category) = LOWER($2) AND id != $3";
+      const checkResult = await client.query(checkSql, [userId, normalizedNewCategory, categoryId]);
+
+      if (checkResult.rowCount > 0) {
+        await client.query("ROLLBACK");
+        return res.status(201).json({
+          success: false,
+          status:201,
+          message: "Category already exists"
+        });
+      }
 
       // 1️⃣ Update category table
       const updateCategorySql = `
-      UPDATE category
-      SET category = $1
-      WHERE id = $2 AND user_id = $3 AND category = $4
-      RETURNING *;
-    `;
+        UPDATE category
+        SET category = $1
+        WHERE id = $2 AND user_id = $3 AND category = $4
+        RETURNING *;
+      `;
 
       const categoryResult = await client.query(updateCategorySql, [
-        formattedNewCategory,
+        normalizedNewCategory,
         categoryId,
         userId,
         oldCategory
@@ -107,22 +128,22 @@ module.exports = function categoryRoutes(pool) {
 
       // 2️⃣ Update expense_items table
       const updateExpenseItemSql = `
-      UPDATE expense_items
-      SET category = $1
-      WHERE category = $2 AND user_id = $3;
-    `;
+        UPDATE expense_items
+        SET category = $1
+        WHERE category = $2 AND user_id = $3;
+      `;
 
       await client.query(updateExpenseItemSql, [
-        formattedNewCategory,
+        normalizedNewCategory,
         oldCategory,
         userId
       ]);
 
       await client.query("COMMIT");
 
-      return res.json({
+      return res.status(200).json({
         success: true,
-        message: "Category updated successfully with proper capitalization",
+        message: "Category updated successfully",
         updatedCategory: categoryResult.rows[0]
       });
 
@@ -139,9 +160,9 @@ module.exports = function categoryRoutes(pool) {
   });
 
   // DELETE CATEGORY (mobile app)
-  router.delete("/delete-category/:categoryId/:userId", async (req, res) => {
+  router.delete("/delete-category/:categoryId", async (req, res) => {
     const categoryId = parseInt(req.params.categoryId);
-    const userId = parseInt(req.params.userId);
+    const userId = req.user.id;
 
     const client = await pool.connect();
 
@@ -210,7 +231,6 @@ module.exports = function categoryRoutes(pool) {
       client.release();
     }
   });
-
 
 
   return router;

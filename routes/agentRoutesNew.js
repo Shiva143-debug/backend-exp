@@ -12,17 +12,18 @@ module.exports = function agentRoutes(ai, pool) {
   const agentService = new AgentService(ai, pool);
 
   /**
-   * Auth Middleware
+   * Auth Middleware — extracts user from JWT (set by authenticateToken)
    */
   const ensureAuth = (req, res, next) => {
-    const { userId, userName } = req.body;
-    if (!userId) {
+    if (!req.user || !req.user.id) {
       return res.status(401).json({
         action: "reply",
-        reply: "Authentication required. Please provide userId in request body."
+        reply: "Authentication required. Please provide a valid token."
       });
     }
-    req.user = { id: userId, name: userName || "User" };
+    if (!req.user.name) {
+      req.user.name = req.user.full_name || "User";
+    }
     next();
   };
 

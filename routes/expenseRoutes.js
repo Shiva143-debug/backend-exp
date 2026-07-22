@@ -1,4 +1,3 @@
-// routes/expenseRoutes.js
 const express = require('express');
 
 module.exports = function expenseRoutes(pool/*, upload*/) {
@@ -7,10 +6,10 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
   //============================EXPENCE==================================== //
 
   // GET ALL EXPENSES(mobile app)
-  router.get('/get-all-expenses/:userId', (req, res) => {
-    const userId = req.params.userId;
-    const sql = `SELECT * FROM expense WHERE user_id = ${userId}`;
-    pool.query(sql, (err, data) => {
+  router.get('/get-all-expenses', (req, res) => {
+    const userId = req.user.id;
+    const sql = `SELECT * FROM expense WHERE user_id = $1`;
+    pool.query(sql, [userId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
     });
@@ -18,14 +17,16 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
   // ADD EXPENSE(mobile app)
   router.post("/add-expense", (req, res) => {
-    const { id, category, expense_name, cost, p_date, description, is_tax_app, percentage, tax_amount, image } = req.body;
+    const { category, expenseName, cost, pDate, description, isTaxApp, percentage, taxAmount, image } = req.body;
+    const userId = req.user.id;
+    console.log("Received expense data:", req.body);
 
-    const dateObject = new Date(p_date);
+    const dateObject = new Date(pDate);
     const month = dateObject.getMonth() + 1;
     const year = dateObject.getFullYear();
 
     const sql = "INSERT INTO expense (category, expense_name, cost, p_date, description, is_tax_app, percentage, tax_amount, month, year,user_id,image) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11,$12)";
-    const values = [category, expense_name, cost, p_date, description, is_tax_app, percentage, tax_amount, month, year, id, image];
+    const values = [category, expenseName, cost, pDate, description, isTaxApp, percentage, taxAmount, month, year, userId, image];
 
     pool.query(sql, values, (err, result) => {
       if (err) {
@@ -42,19 +43,19 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
     const {
       category,
-      expense_name,
+      expenseName,
       cost,
-      p_date,
+      pDate,
       description,
-      is_tax_app,
+      isTaxApp,
       percentage,
-      tax_amount,
-      image,
-      user_id
+      taxAmount,
+      image
     } = req.body;
+    const userId = req.user.id;
 
     try {
-      const dateObject = new Date(p_date);
+      const dateObject = new Date(pDate);
       const month = dateObject.getMonth() + 1;
       const year = dateObject.getFullYear();
 
@@ -78,18 +79,18 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
       const values = [
         category,
-        expense_name,
+        expenseName,
         cost,
-        p_date,
+        pDate,
         description,
-        is_tax_app,
+        isTaxApp,
         percentage,
-        tax_amount,
+        taxAmount,
         month,
         year,
         image,
         expenseId,
-        user_id
+        userId
       ];
 
       const result = await pool.query(sql, values);
@@ -109,9 +110,9 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
   });
 
   // DELETE EXPENSE(mobile app)
-  router.delete('/delete-expence/:expenseId/:userId', (req, res) => {
+  router.delete('/delete-expence/:expenseId', (req, res) => {
     const expenseId = parseInt(req.params.expenseId);
-    const userId = parseInt(req.params.userId);
+    const userId = req.user.id;
 
     const sql = "DELETE FROM expense WHERE id=$1 AND user_id=$2";
     pool.query(sql, [expenseId, userId], (err, data) => {
@@ -127,10 +128,10 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
   //================================EXPENSE ITEM  ==================================== //
 
-  router.get("/get-expense-items/:userId", (req, res) => {
-    const userId = req.params.userId;
-    const sql = `SELECT * FROM expense_items WHERE user_id = ${userId} or user_id =0`;
-    pool.query(sql, (err, data) => {
+  router.get("/get-expense-items", (req, res) => {
+    const userId = req.user.id;
+    const sql = `SELECT * FROM expense_items WHERE user_id = $1 or user_id =0`;
+    pool.query(sql, [userId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
     });
@@ -138,10 +139,11 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
 
   router.get("/get-expense-items-by-category", (req, res) => {
-    const { category, userId } = req.query;
+    const { category } = req.query;
+    const userId = req.user.id;
 
-    if (!category || !userId) {
-      return res.status(400).json({ error: "Invalid category or user_id" });
+    if (!category) {
+      return res.status(400).json({ error: "Invalid category" });
     }
 
     const sql =
@@ -158,89 +160,115 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
 
   router.post("/add-expense-item", (req, res) => {
-    const { id, category, expenseName } = req.body;
+    const { category, expenseName } = req.body;
+    const userId = req.user.id;
+
+    if (!expenseName) {
+      return res.status(400).json({ error: "Expense name is required" });
+    }
+
+    const normalizedExpenseName = expenseName
+      .split(/[\s_-]+/)
+      .filter(word => word.length > 0)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
 
     const checkExpenseItemSql =
-      "SELECT * FROM expense_items WHERE category = $1 AND expense_name = $2 AND user_id = $3";
+      "SELECT * FROM expense_items WHERE category = $1 AND LOWER(expense_name) = LOWER($2) AND  (user_id = $3 OR user_id = 0)";
     const insertExpenseItemSql =
       "INSERT INTO expense_items (category, expense_name, user_id) VALUES ($1, $2, $3)";
-    const updateExpenseItemSql =
-      "UPDATE expense_items SET expense_name = $2 WHERE category = $1  AND user_id = $3";
 
-    const values = [category, expenseName, id];
-
-    pool.query(checkExpenseItemSql, [category, expenseName, id], (err, results) => {
+    pool.query(checkExpenseItemSql, [category, normalizedExpenseName, userId], (err, results) => {
       if (err) {
         console.error("Error checking existing expense Name:", err);
         return res.status(500).json({ error: "Internal server error" });
       }
 
       if (results.rows.length > 0) {
-        pool.query(updateExpenseItemSql, [expenseName, category, id], (err, result) => {
-          if (err) {
-            console.error("Error updating expense Name:", err);
-            return res.status(500).json({ error: "Internal server error" });
-          }
-          return res.json(result);
-        });
+        return res.status(201).json({ message: "Expense Name already exist" });
       } else {
-        pool.query(insertExpenseItemSql, values, (err, result) => {
+        pool.query(insertExpenseItemSql, [category, normalizedExpenseName, userId], (err, result) => {
           if (err) {
             console.error("Error inserting expense Name:", err);
             return res.status(500).json({ error: "Internal server error" });
           }
-          return res.json(result);
+          return res.status(200).json(result);
         });
       }
     });
   });
+      
 
 
-  router.put("/update-expense-item/:expenseItemId/:userId", (req, res) => {
-    const { expenseItemId, userId } = req.params;
+
+  router.put("/update-expense-item/:expenseItemId", async (req, res) => {
+    const { expenseItemId } = req.params;
     const { newexpenseItem } = req.body;
+    const userId = req.user.id;
 
+    if (!newexpenseItem) {
+      return res.status(400).json({ error: "newexpenseItem is required" });
+    }
 
-    const updateSql = `
-    UPDATE expense_items
-    SET expense_name = $1
-    WHERE id = $2 AND user_id = $3
-    RETURNING *;
-  `;
+    const normalizedExpenseName = newexpenseItem
+      .split(/[\s_-]+/)
+      .filter(word => word.length > 0)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
 
-    pool.query(
-      updateSql,
-      [newexpenseItem, expenseItemId, userId],
-      (err, result) => {
-        if (err) {
-          console.error("Error updating expense name:", err);
-          return res.status(500).json({
-            success: false,
-            message: "Internal server error"
-          });
-        }
+    try {
+      // 1. Get current category of the item to check for duplicates within the same category
+      const itemRes = await pool.query(
+        "SELECT category FROM expense_items WHERE id = $1 AND  (user_id = $2 OR user_id = 0)",
+        [expenseItemId, userId]
+      );
 
-        if (result.rowCount === 0) {
-          return res.status(404).json({
-            success: false,
-            message:
-              "expense item not found or user does not have permission"
-          });
-        }
-
-        return res.json({
-          success: true,
-          message: "Expense name updated successfully",
-          data: result.rows[0]
+      if (itemRes.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "expense item not found or user does not have permission"
         });
       }
-    );
+
+      const category = itemRes.rows[0].category;
+
+      // 2. Check if another item with the same name exists in this category
+      const checkSql =
+        "SELECT * FROM expense_items WHERE category = $1 AND LOWER(expense_name) = LOWER($2) AND  (user_id = $3 OR user_id = 0)AND id != $4";
+      const checkResult = await pool.query(checkSql, [category, normalizedExpenseName, userId, expenseItemId]);
+
+      if (checkResult.rowCount > 0) {
+        return res.status(201).json({status:201, message: "Expense Name already exist" });
+      }
+
+      // 3. Update the item
+      const updateSql = `
+        UPDATE expense_items
+        SET expense_name = $1
+        WHERE id = $2 AND user_id = $3
+        RETURNING *;
+      `;
+
+      const result = await pool.query(updateSql, [normalizedExpenseName, expenseItemId, userId]);
+
+      return res.status(200).json({
+        success: true,
+        message: "Expense name updated successfully",
+        data: result.rows[0]
+      });
+    } catch (err) {
+      console.error("Error updating expense name:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error"
+      });
+    }
   });
 
 
-  router.delete("/delete-expense-item/:expenseItemId/:userId", async (req, res) => {
+  router.delete("/delete-expense-item/:expenseItemId", async (req, res) => {
     const expenseItemId = parseInt(req.params.expenseItemId);
-    const userId = parseInt(req.params.userId);
+    const userId = req.user.id;
 
     const client = await pool.connect();
 
@@ -303,24 +331,23 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
 
 
-
   // GET EXPENSE BY ITEM ID
-  router.get('/getExpenseCostByItemId/:id/:itemId', (req, res) => {
-    const user_id = req.params.id;
+  router.get('/getExpenseCostByItemId/:itemId', (req, res) => {
+    const userId = req.user.id;
     const itemId = req.params.itemId;
-    const sql = `SELECT * FROM expense WHERE user_id = ${user_id} and id = ${itemId}`;
-    pool.query(sql, (err, data) => {
+    const sql = `SELECT * FROM expense WHERE user_id = $1 and id = $2`;
+    pool.query(sql, [userId, itemId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows[0]);
     });
   });
 
   // YEAR-WISE EXPENSE DATA
-  router.get('/getYearWiseExpenceData/:id/:year', (req, res) => {
-    const user_id = req.params.id;
+  router.get('/getYearWiseExpenceData/:year', (req, res) => {
+    const userId = req.user.id;
     const year = parseInt(req.params.year);
-    const sql = `SELECT * FROM expense  WHERE user_id = ${user_id} And year= ${year}`;
-    pool.query(sql, (err, data) => {
+    const sql = `SELECT * FROM expense  WHERE user_id = $1 And year= $2`;
+    pool.query(sql, [userId, year], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
     });
@@ -330,10 +357,10 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
   router.get("/filteredSourceData", (req, res) => {
     const month = req.query.month;
     const year = req.query.year;
-    const user_id = req.query.user_id;
+    const userId = req.user.id;
 
     const sql = `SELECT Source, SUM(cost) AS totalCost FROM expense WHERE month = $1 AND year = $2 And user_id = $3 GROUP BY Source`;
-    pool.query(sql, [month, year, user_id], (err, result) => {
+    pool.query(sql, [month, year, userId], (err, result) => {
       if (err) {
         console.error(err);
         return res.status(500).json({ error: "Internal Server Error" });

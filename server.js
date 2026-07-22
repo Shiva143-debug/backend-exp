@@ -4,25 +4,13 @@ const cors = require('cors')
 const bodyParser = require('body-parser');
 const multer = require('multer')
 const upload = multer({ dest: 'uploads/' });
-const nodemailer = require('nodemailer');
 require('dotenv').config();
 // const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { GoogleGenAI } = require('@google/genai');
 const appInfo = require('./appInfo.json');
-const { google } = require("googleapis");
-
-const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
-const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-const REDIRECT_URI = "https://developers.google.com/oauthplayground";
-const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
-
-const oAuth2Client = new google.auth.OAuth2(
-    CLIENT_ID,
-    CLIENT_SECRET,
-    REDIRECT_URI
-);
-
-oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
+const { generateToken, authenticateToken } = require('./middleware/auth');
+const camelCaseResponse = require('./middleware/camelCase');
+const { sendMail } = require('./services/emailService');
 const incomeRoutes = require('./routes/incomeRoutes');
 const savingsRoutes = require('./routes/savingsRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
@@ -33,12 +21,14 @@ const categoryRoutes = require("./routes/categoryRoutes");
 const app = express()
 app.use(cors())
 app.use(express.json())
-app.use(bodyParser.json());
+app.use(bodyParser.json())
+app.use(camelCaseResponse);
 
 
+const isLocalDB = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.DB_SSL === 'false' || isLocalDB ? false : { rejectUnauthorized: false },
 });
 
 const ai = new GoogleGenAI({
@@ -48,42 +38,9 @@ const ai = new GoogleGenAI({
 console.log("Gemini API Key being used:", process.env.GEMINI_API_KEY ? "✅ Loaded" : "❌ Missing");
 
 
-app.use('/', incomeRoutes(pool));
-app.use('/', savingsRoutes(pool));
-app.use('/', expenseRoutes(pool, upload));
-app.use('/', agentRoutesNew(ai, pool));
-app.use("/", categoryRoutes(pool));
-
-
-async function sendMail(to, subject, text) {
-  try {
-    const accessToken = await oAuth2Client.getAccessToken();
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        type: "OAuth2",
-        user: process.env.EMAIL_FROM, // your Gmail address
-        clientId: CLIENT_ID,
-        clientSecret: CLIENT_SECRET,
-        refreshToken: REFRESH_TOKEN,
-        accessToken: accessToken.token,
-      },
-    });
-
-    const mailOptions = { from: process.env.EMAIL_FROM, to, subject, text };
-
-    const result = await transporter.sendMail(mailOptions);
-    return result;
-  } catch (error) {
-    console.error("Error sending mail:", error);
-    throw error;
-  }
-}
-
-
+// ── Public routes (no auth required) ──
 app.post("/register", async (req, res) => {
-    const { full_name, email, mobile_no, address } = req.body;
+    const { fullName, email, mobileNo, address } = req.body;
     const password = Math.floor(100000 + Math.random() * 900000).toString();
 
     const client = await pool.connect();
@@ -99,14 +56,14 @@ app.post("/register", async (req, res) => {
         await client.query("BEGIN");
         await client.query(
             "INSERT INTO register (full_name, email, mobile_no, address, password) VALUES ($1,$2,$3,$4,$5)",
-            [full_name, email, mobile_no, address, password]
+            [fullName, email, mobileNo, address, password]
         );
 
         // Send email via OAuth2
         await sendMail(
             email,
             "Your Password for Registration",
-            `Dear ${full_name}, your password is ${password}`
+            `Dear ${fullName}, your password is ${password}`
         );
 
         await client.query("COMMIT");
@@ -157,9 +114,13 @@ app.post("/login", (req, res) => {
             return res.status(401).json({ error: "Invalid email or password", message: "Login Failure" });
         }
 
-        // Login successful
-        console.log(res)
-        return res.status(200).json({ message: "Login successful", result: user });
+        // Login successful - generate JWT token
+        const token = generateToken(user);
+        return res.status(200).json({
+          message: "Login successful",
+          result: user,
+          token: token
+        });
 
     });
 });
@@ -222,14 +183,15 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-app.post('/uploadProfilePicture', (req, res) => {
+app.post('/uploadProfilePicture', authenticateToken, (req, res) => {
 
-    const { id, profile_picture_url } = req.body;
+    const { profile_picture_url } = req.body;
+    const userId = req.user.id;
     console.log(profile_picture_url)
-    console.log(id)
+    console.log(userId)
 
 
-    pool.query('UPDATE register SET profile_picture_url = $1 WHERE id = $2', [profile_picture_url, id], (err, result) => {
+    pool.query('UPDATE register SET profile_picture_url = $1 WHERE id = $2', [profile_picture_url, userId], (err, result) => {
         if (err) {
             console.error('Error updating profile picture URL in the database:', err);
             res.sendStatus(500);
@@ -240,12 +202,12 @@ app.post('/uploadProfilePicture', (req, res) => {
     });
 });
 
-app.get('/getPhoto/:id', (req, res) => {
+app.get('/getPhoto', authenticateToken, (req, res) => {
 
-    const id = req.params.id;
+    const userId = req.user.id;
 
     const sql = "SELECT profile_picture_url FROM register where id= $1 ";
-    pool.query(sql, [id], (err, data) => {
+    pool.query(sql, [userId], (err, data) => {
         // console.log(err);
         // console.log(data);
         if (err) return res.json(err);
@@ -253,7 +215,7 @@ app.get('/getPhoto/:id', (req, res) => {
     })
 })
 
-app.put('/updateUserPassword', (req, res) => {
+app.put('/updateUserPassword', authenticateToken, (req, res) => {
     const { email, updatedpassword, updatedConfirmpassword } = req.body;
 
     // Validate inputs
@@ -278,7 +240,7 @@ app.put('/updateUserPassword', (req, res) => {
     });
 });
 
-app.post('/create-payment', async (req, res) => {
+app.post('/create-payment', authenticateToken, async (req, res) => {
     const { name, amount, transaction } = req.body;
 
     try {
@@ -310,13 +272,20 @@ app.post('/create-payment', async (req, res) => {
     }
 });
 
-app.get('/getpayment', (req, res) => {
+app.get('/getpayment', authenticateToken, (req, res) => {
     const sql = "SELECT  * FROM payment";
     pool.query(sql, (err, data) => {
         if (err) return res.json(err);
         return res.json(data.rows);
     });
 });
+
+// ── Protected routes (require JWT) ──
+app.use('/', authenticateToken, incomeRoutes(pool));
+app.use('/', authenticateToken, savingsRoutes(pool));
+app.use('/', authenticateToken, expenseRoutes(pool, upload));
+app.use('/', authenticateToken, agentRoutesNew(ai, pool));
+app.use("/", authenticateToken, categoryRoutes(pool));
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log('server on', PORT));
