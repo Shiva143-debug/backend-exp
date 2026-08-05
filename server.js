@@ -240,7 +240,7 @@ app.put('/updateUserPassword', authenticateToken, (req, res) => {
     });
 });
 
-app.post('/create-payment', authenticateToken, async (req, res) => {
+app.post('/create-payment', async (req, res) => {
     const { name, amount, transaction } = req.body;
 
     try {
@@ -272,7 +272,7 @@ app.post('/create-payment', authenticateToken, async (req, res) => {
     }
 });
 
-app.get('/getpayment', authenticateToken, (req, res) => {
+app.get('/getpayment', (req, res) => {
     const sql = "SELECT  * FROM payment";
     pool.query(sql, (err, data) => {
         if (err) return res.json(err);
