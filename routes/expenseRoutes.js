@@ -6,11 +6,31 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
   //============================EXPENCE==================================== //
 
   // GET ALL EXPENSES(mobile app)
-  router.get('/get-all-expenses', (req, res) => {
+  router.get("/get-all-expenses", (req, res) => {
     const userId = req.user.id;
-    const sql = `SELECT * FROM expense WHERE user_id = $1`;
+
+    const sql = `
+    SELECT 
+      e.*,
+      c.category ,
+      ei.expense_name 
+    FROM expense e
+    LEFT JOIN category c
+      ON c.id = e.category_id
+    LEFT JOIN expense_items ei
+      ON ei.id = e.expense_item_id
+    WHERE e.user_id = $1
+    ORDER BY e.id DESC
+  `;
+
     pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
+      if (err) {
+        console.error("Error fetching expenses:", err);
+        return res.status(500).json({
+          error: "Internal server error"
+        });
+      }
+
       return res.json(data.rows);
     });
   });
@@ -128,9 +148,20 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
   //================================EXPENSE ITEM  ==================================== //
 
+
   router.get("/get-expense-items", (req, res) => {
     const userId = req.user.id;
-    const sql = `SELECT * FROM expense_items WHERE user_id = $1 or user_id =0`;
+
+    const sql = `
+    SELECT 
+      * ,
+      c.category 
+    FROM expense_items ei
+    LEFT JOIN category c 
+      ON c.id = ei.category_id
+    WHERE ei.user_id = $1 OR ei.user_id = 0
+  `;
+
     pool.query(sql, [userId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
@@ -139,16 +170,26 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
 
   router.get("/get-expense-items-by-category", (req, res) => {
-    const { category } = req.query;
+    const { categoryId } = req.query;
     const userId = req.user.id;
 
-    if (!category) {
+    if (!categoryId) {
       return res.status(400).json({ error: "Invalid category" });
     }
 
     const sql =
-      "SELECT * FROM expense_items WHERE category = $1 AND (user_id = $2 or user_id = 0)";
-    pool.query(sql, [category, userId], (err, results) => {
+      `
+    SELECT 
+      * ,
+      c.category 
+    FROM expense_items ei
+    LEFT JOIN category c 
+      ON c.id = ei.category_id
+    WHERE category_id = $1 AND (ei.user_id = $2 OR ei.user_id = 0)
+  `;
+
+    // "SELECT * FROM expense_items WHERE category_id = $1 AND (user_id = $2 or user_id = 0)";
+    pool.query(sql, [categoryId, userId], (err, results) => {
       if (err) {
         console.error("Error fetching expense items:", err);
         return res.status(500).json({ error: "Internal server error" });
@@ -159,46 +200,158 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
   });
 
 
-  router.post("/add-expense-item", (req, res) => {
-    const { category, expenseName } = req.body;
+  // GET EXPENSE BY ITEM ID
+  router.get('/getExpenseCostByItemId/:itemId', (req, res) => {
     const userId = req.user.id;
+    const itemId = req.params.itemId;
+    const sql = `
+    SELECT 
+      e.*,
+      c.category ,
+      ei.expense_name 
+    FROM expense e
+    LEFT JOIN category c
+      ON c.id = e.category_id
+    LEFT JOIN expense_items ei
+      ON ei.id = e.expense_item_id
+    WHERE e.user_id = $1 and e.id = $2
+    ORDER BY e.id DESC
+  `;
 
-    if (!expenseName) {
-      return res.status(400).json({ error: "Expense name is required" });
-    }
-
-    const normalizedExpenseName = expenseName
-      .split(/[\s_-]+/)
-      .filter(word => word.length > 0)
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join('');
-
-    const checkExpenseItemSql =
-      "SELECT * FROM expense_items WHERE category = $1 AND LOWER(expense_name) = LOWER($2) AND  (user_id = $3 OR user_id = 0)";
-    const insertExpenseItemSql =
-      "INSERT INTO expense_items (category, expense_name, user_id) VALUES ($1, $2, $3)";
-
-    pool.query(checkExpenseItemSql, [category, normalizedExpenseName, userId], (err, results) => {
-      if (err) {
-        console.error("Error checking existing expense Name:", err);
-        return res.status(500).json({ error: "Internal server error" });
-      }
-
-      if (results.rows.length > 0) {
-        return res.status(201).json({ message: "Expense Name already exist" });
-      } else {
-        pool.query(insertExpenseItemSql, [category, normalizedExpenseName, userId], (err, result) => {
-          if (err) {
-            console.error("Error inserting expense Name:", err);
-            return res.status(500).json({ error: "Internal server error" });
-          }
-          return res.status(200).json(result);
-        });
-      }
+    pool.query(sql, [userId, itemId], (err, data) => {
+      if (err) return res.json(err);
+      return res.json(data.rows[0]);
     });
   });
-      
 
+  // YEAR-WISE EXPENSE DATA
+  router.get('/getYearWiseExpenceData/:year', (req, res) => {
+    const userId = req.user.id;
+    const year = parseInt(req.params.year);
+    const sql = `
+    SELECT 
+      e.*,
+      c.category ,
+      ei.expense_name 
+    FROM expense e
+    LEFT JOIN category c
+      ON c.id = e.category_id
+    LEFT JOIN expense_items ei
+      ON ei.id = e.expense_item_id
+    WHERE e.user_id = $1 and e.year= $2
+    ORDER BY e.id DESC
+  `;
+
+    pool.query(sql, [userId, year], (err, data) => {
+      if (err) return res.json(err);
+      return res.json(data.rows);
+    });
+  });
+
+  // FILTERED SOURCE DATA (actually expense grouped by Source column)
+  router.get("/filteredSourceData", (req, res) => {
+    const month = req.query.month;
+    const year = req.query.year;
+    const userId = req.user.id;
+
+    const sql = `SELECT SUM(cost) AS totalCost FROM expense WHERE month = $1 AND year = $2 And user_id = $3 `;
+    pool.query(sql, [month, year, userId], (err, result) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Internal Server Error" });
+      }
+      return res.json(result.rows);
+    });
+  });
+
+
+  router.post("/add-expense-item", (req, res) => {
+    const { categoryId, expenseName } = req.body;
+    const userId = req.user.id;
+
+    if (!categoryId) {
+      return res.status(400).json({
+        success: false,
+        message: "Category is required"
+      });
+    }
+
+    if (!expenseName || !String(expenseName).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Expense name is required"
+      });
+    }
+
+    const normalizedExpenseName = String(expenseName)
+      .trim()
+      .split(/[\s_-]+/)
+      .filter(word => word.length > 0)
+      .map(
+        word =>
+          word.charAt(0).toUpperCase() +
+          word.slice(1).toLowerCase()
+      )
+      .join("");
+
+    const checkExpenseItemSql = `
+    SELECT *
+    FROM expense_items
+    WHERE category_id = $1
+      AND LOWER(expense_name) = LOWER($2)
+      AND (user_id = $3 OR user_id = 0)
+  `;
+
+    const insertExpenseItemSql = `
+    INSERT INTO expense_items
+      (category_id, expense_name, user_id)
+    VALUES
+      ($1, $2, $3)
+    RETURNING *;
+  `;
+
+    pool.query(
+      checkExpenseItemSql,
+      [categoryId, normalizedExpenseName, userId],
+      (err, results) => {
+        if (err) {
+          console.error("Error checking existing expense name:", err);
+
+          return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+          });
+        }
+
+        if (results.rows.length > 0) {
+          return res.status(409).json({
+            success: false,
+            message: "Expense Item already exists"
+          });
+        }
+
+        pool.query(
+          insertExpenseItemSql,
+          [categoryId, normalizedExpenseName, userId],
+          (err, result) => {
+            if (err) {
+              console.error("Error inserting expense name:", err);
+
+              return res.status(500).json({
+                success: false,
+                message: "Internal server error"
+              });
+            }
+
+            return res.status(201).json({
+              message: "Expense Item added successfully",
+              data: result.rows[0]
+            });
+          }
+        );
+      }
+    );
+  });
 
 
   router.put("/update-expense-item/:expenseItemId", async (req, res) => {
@@ -206,58 +359,105 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     const { newexpenseItem } = req.body;
     const userId = req.user.id;
 
-    if (!newexpenseItem) {
-      return res.status(400).json({ error: "newexpenseItem is required" });
+    if (!newexpenseItem || !String(newexpenseItem).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "newexpenseItem is required"
+      });
     }
 
-    const normalizedExpenseName = newexpenseItem
+    const normalizedExpenseName = String(newexpenseItem)
+      .trim()
       .split(/[\s_-]+/)
       .filter(word => word.length > 0)
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join('');
+      .map(
+        word =>
+          word.charAt(0).toUpperCase() +
+          word.slice(1).toLowerCase()
+      )
+      .join("");
 
     try {
-      // 1. Get current category of the item to check for duplicates within the same category
+      // 1. Get current category_id of the expense item
       const itemRes = await pool.query(
-        "SELECT category FROM expense_items WHERE id = $1 AND  (user_id = $2 OR user_id = 0)",
+        `
+      SELECT category_id
+      FROM expense_items
+      WHERE id = $1
+        AND (user_id = $2 OR user_id = 0)
+      `,
         [expenseItemId, userId]
       );
 
       if (itemRes.rowCount === 0) {
         return res.status(404).json({
           success: false,
-          message: "expense item not found or user does not have permission"
+          message: "Expense item not found or user does not have permission"
         });
       }
 
-      const category = itemRes.rows[0].category;
+      const categoryId = itemRes.rows[0].category_id;
 
-      // 2. Check if another item with the same name exists in this category
-      const checkSql =
-        "SELECT * FROM expense_items WHERE category = $1 AND LOWER(expense_name) = LOWER($2) AND  (user_id = $3 OR user_id = 0)AND id != $4";
-      const checkResult = await pool.query(checkSql, [category, normalizedExpenseName, userId, expenseItemId]);
+      // 2. Check duplicate expense name within the same category
+      const checkSql = `
+      SELECT 1
+      FROM expense_items
+      WHERE category_id = $1
+        AND LOWER(expense_name) = LOWER($2)
+        AND (user_id = $3 OR user_id = 0)
+        AND id != $4
+    `;
+
+      const checkResult = await pool.query(checkSql, [
+        categoryId,
+        normalizedExpenseName,
+        userId,
+        expenseItemId
+      ]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(201).json({status:201, message: "Expense Name already exist" });
+        return res.status(409).json({
+          success: false,
+          message: "Expense item already exists"
+        });
       }
 
-      // 3. Update the item
+      // 3. Update only expense_name
       const updateSql = `
-        UPDATE expense_items
-        SET expense_name = $1
-        WHERE id = $2 AND user_id = $3
-        RETURNING *;
-      `;
+      UPDATE expense_items
+      SET expense_name = $1
+      WHERE id = $2
+        AND user_id = $3
+      RETURNING
+        id,
+        category_id AS "categoryId",
+        expense_name AS "expenseName",
+        user_id AS "userId",
+        created_at AS "createdAt";
+    `;
 
-      const result = await pool.query(updateSql, [normalizedExpenseName, expenseItemId, userId]);
+      const result = await pool.query(updateSql, [
+        normalizedExpenseName,
+        expenseItemId,
+        userId
+      ]);
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Expense item not found or no permission"
+        });
+      }
 
       return res.status(200).json({
         success: true,
-        message: "Expense name updated successfully",
+        message: "Expense item updated successfully",
         data: result.rows[0]
       });
+
     } catch (err) {
-      console.error("Error updating expense name:", err);
+      console.error("Error updating expense item:", err);
+
       return res.status(500).json({
         success: false,
         message: "Internal server error"
@@ -326,50 +526,6 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
       client.release();
     }
   });
-
-
-
-
-
-  // GET EXPENSE BY ITEM ID
-  router.get('/getExpenseCostByItemId/:itemId', (req, res) => {
-    const userId = req.user.id;
-    const itemId = req.params.itemId;
-    const sql = `SELECT * FROM expense WHERE user_id = $1 and id = $2`;
-    pool.query(sql, [userId, itemId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows[0]);
-    });
-  });
-
-  // YEAR-WISE EXPENSE DATA
-  router.get('/getYearWiseExpenceData/:year', (req, res) => {
-    const userId = req.user.id;
-    const year = parseInt(req.params.year);
-    const sql = `SELECT * FROM expense  WHERE user_id = $1 And year= $2`;
-    pool.query(sql, [userId, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
-
-  // FILTERED SOURCE DATA (actually expense grouped by Source column)
-  router.get("/filteredSourceData", (req, res) => {
-    const month = req.query.month;
-    const year = req.query.year;
-    const userId = req.user.id;
-
-    const sql = `SELECT Source, SUM(cost) AS totalCost FROM expense WHERE month = $1 AND year = $2 And user_id = $3 GROUP BY Source`;
-    pool.query(sql, [month, year, userId], (err, result) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: "Internal Server Error" });
-      }
-      return res.json(result.rows);
-    });
-  });
-
-
 
   return router;
 };

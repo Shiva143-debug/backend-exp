@@ -26,10 +26,6 @@ module.exports = function categoryRoutes(pool) {
       });
     }
 
-    // const normalizedCategory = trimmedCategory.replace(/\w\S*/g, (w) =>
-    //   w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
-    // );
-
     try {
       const checkSql = `
       SELECT 1 FROM category
@@ -39,10 +35,7 @@ module.exports = function categoryRoutes(pool) {
       const checkResult = await pool.query(checkSql, [userId, trimmedCategory]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(201).json({message: "Category already exists" });
-        // return res.json({
-        //   message: "Category already exists"
-        // });
+        return res.status(201).json({ message: "Category already exists" });
       }
 
       const insertSql = `
@@ -66,78 +59,101 @@ module.exports = function categoryRoutes(pool) {
     }
   });
 
-
-  //UPDATE CATEGORY (mobile app)
+  // UPDATE CATEGORY (mobile app)
   router.put("/update-category/:categoryId", async (req, res) => {
     const { categoryId } = req.params;
-    const { oldCategory, newCategory } = req.body;
+    const { newCategory } = req.body;
     const userId = req.user.id;
 
-    if (!oldCategory || !newCategory) {
+    // Validate category ID
+    const categoryIdNumber = Number(categoryId);
+
+    if (!Number.isInteger(categoryIdNumber)) {
       return res.status(400).json({
         success: false,
-        message: "oldCategory and newCategory are required"
+        message: "Invalid categoryId"
       });
     }
 
-    const normalizedNewCategory = newCategory
+    // Validate category name
+    if (!newCategory || !String(newCategory).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "newCategory is required"
+      });
+    }
+
+    // Normalize category name
+    const normalizedNewCategory = String(newCategory)
+      .trim()
       .split(/[\s_-]+/)
       .filter(word => word.length > 0)
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join('');
+      .map(
+        word =>
+          word.charAt(0).toUpperCase() +
+          word.slice(1).toLowerCase()
+      )
+      .join("");
+
+    if (!normalizedNewCategory) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid category name"
+      });
+    }
 
     const client = await pool.connect();
 
     try {
       await client.query("BEGIN");
 
-      const checkSql = "SELECT 1 FROM category  WHERE (user_id = $1 OR user_id = 0) AND LOWER(category) = LOWER($2) AND id != $3";
-      const checkResult = await client.query(checkSql, [userId, normalizedNewCategory, categoryId]);
+      // Check whether category already exists
+      const checkSql = `
+      SELECT 1
+      FROM category
+      WHERE (user_id = $1 OR user_id = 0)
+        AND LOWER(category) = LOWER($2)
+        AND id != $3
+    `;
+
+      const checkResult = await client.query(checkSql, [
+        userId,
+        normalizedNewCategory,
+        categoryIdNumber
+      ]);
 
       if (checkResult.rowCount > 0) {
         await client.query("ROLLBACK");
-        return res.status(201).json({
+
+        return res.status(409).json({
           success: false,
-          status:201,
           message: "Category already exists"
         });
       }
 
-      // 1️⃣ Update category table
+      // Update only category table
       const updateCategorySql = `
-        UPDATE category
-        SET category = $1
-        WHERE id = $2 AND user_id = $3 AND category = $4
-        RETURNING *;
-      `;
+      UPDATE category
+      SET category = $1
+      WHERE id = $2
+        AND user_id = $3
+      RETURNING *;
+    `;
 
       const categoryResult = await client.query(updateCategorySql, [
         normalizedNewCategory,
-        categoryId,
-        userId,
-        oldCategory
+        categoryIdNumber,
+        userId
       ]);
 
       if (categoryResult.rowCount === 0) {
         await client.query("ROLLBACK");
+
         return res.status(404).json({
           success: false,
           message: "Category not found or no permission"
         });
       }
-
-      // 2️⃣ Update expense_items table
-      const updateExpenseItemSql = `
-        UPDATE expense_items
-        SET category = $1
-        WHERE category = $2 AND user_id = $3;
-      `;
-
-      await client.query(updateExpenseItemSql, [
-        normalizedNewCategory,
-        oldCategory,
-        userId
-      ]);
 
       await client.query("COMMIT");
 
@@ -149,16 +165,21 @@ module.exports = function categoryRoutes(pool) {
 
     } catch (error) {
       await client.query("ROLLBACK");
+
       console.error("Error updating category:", error);
+
       return res.status(500).json({
         success: false,
         message: "Internal server error"
       });
+
     } finally {
       client.release();
     }
   });
 
+
+  //testing pending
   // DELETE CATEGORY (mobile app)
   router.delete("/delete-category/:categoryId", async (req, res) => {
     const categoryId = parseInt(req.params.categoryId);

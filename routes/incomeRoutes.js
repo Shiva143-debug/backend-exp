@@ -32,7 +32,7 @@ module.exports = function incomeRoutes(pool) {
       );
 
       if (dupCheck.rowCount > 0) {
-        return res.status(201).json({message: "Income source already exists" });
+        return res.status(201).json({ message: "Income source already exists" });
         // return res.json({ message: "Income source already exists" });
       }
 
@@ -69,7 +69,7 @@ module.exports = function incomeRoutes(pool) {
       const checkResult = await pool.query(checkSql, [userId, normalizedSourceName, sourceId]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(201).json({status:201, message: "Income source already exists" });
+        return res.status(201).json({ status: 201, message: "Income source already exists" });
       }
 
       const updateSql = `
@@ -128,7 +128,8 @@ module.exports = function incomeRoutes(pool) {
 
       if (incomeRes.rowCount > 0) {
         await client.query('ROLLBACK');
-        return res.status(203).json({status:203,
+        return res.status(203).json({
+          status: 203,
           message: 'Income source is used in incomes and cannot be deleted'
         });
       }
@@ -167,7 +168,18 @@ module.exports = function incomeRoutes(pool) {
     const month = parseInt(req.params.month);
     const year = parseInt(req.params.year);
 
-    const sql = `SELECT  * FROM incomes WHERE user_id = $1 AND month =$2 AND year =$3`;
+    const sql = `
+    SELECT 
+      i.*,
+      src.source_name 
+    FROM incomes i
+    LEFT JOIN income_sources src 
+      ON src.id = i.source_id
+    WHERE i.user_id = $1 AND month =$2 AND year =$3
+    ORDER BY i.id DESC
+  `;
+
+    //  `SELECT  * FROM incomes WHERE user_id = $1 AND month =$2 AND year =$3`;
     pool.query(sql, [userId, month, year], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
@@ -175,9 +187,70 @@ module.exports = function incomeRoutes(pool) {
   });
 
   // GET TOTAL INCOME DATA (incomes table)(mobile app)
-  router.get('/get-total-income', (req, res) => {
+  router.get("/get-total-income", (req, res) => {
     const userId = req.user.id;
-    const sql = `SELECT  * FROM incomes WHERE user_id = $1 order by id desc`;
+
+    const sql = `
+    SELECT 
+      i.*,
+      src.source_name 
+    FROM incomes i
+    LEFT JOIN income_sources src 
+      ON src.id = i.source_id
+    WHERE i.user_id = $1
+    ORDER BY i.id DESC
+  `;
+
+    pool.query(sql, [userId], (err, data) => {
+      if (err) {
+        console.error("Error fetching income:", err);
+        return res.status(500).json({
+          error: "Internal server error",
+        });
+      }
+
+      return res.json(data.rows);
+    });
+  });
+
+  // YEAR-WISE INCOME DATA
+  router.get('/getYearWiseData/:year', (req, res) => {
+    const userId = req.user.id;
+    const year = parseInt(req.params.year);
+
+    const sql = `
+    SELECT 
+      i.*,
+      src.source_name 
+    FROM incomes i
+    LEFT JOIN income_sources src 
+      ON src.id = i.source_id
+    WHERE i.user_id = $1  AND year = $2
+    ORDER BY i.id DESC
+  `;
+    // `SELECT  * FROM incomes WHERE user_id = $1 AND year = $2`;
+    pool.query(sql, [userId, year], (err, data) => {
+      if (err) return res.json(err);
+      return res.json(data.rows);
+    });
+  });
+
+  // GET REPORT SOURCE (ALL)
+  router.get('/getReportSource', (req, res) => {
+    const userId = req.user.id;
+    const sql =
+      `
+    SELECT 
+      i.*,
+      src.source_name 
+    FROM incomes i
+    LEFT JOIN income_sources src 
+      ON src.id = i.source_id
+    WHERE i.user_id = $1
+    ORDER BY i.id DESC
+  `;
+
+    // `SELECT  * FROM incomes WHERE user_id = $1`;
     pool.query(sql, [userId], (err, data) => {
       if (err) return res.json(err);
       return res.json(data.rows);
@@ -256,27 +329,7 @@ module.exports = function incomeRoutes(pool) {
     });
   });
 
-  // YEAR-WISE INCOME DATA
-  router.get('/getYearWiseData/:year', (req, res) => {
-    const userId = req.user.id;
-    const year = parseInt(req.params.year);
 
-    const sql = `SELECT  * FROM incomes WHERE user_id = $1 AND year = $2`;
-    pool.query(sql, [userId, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
-
-  // GET REPORT SOURCE (ALL)
-  router.get('/getReportSource', (req, res) => {
-    const userId = req.user.id;
-    const sql = `SELECT  * FROM incomes WHERE user_id = $1`;
-    pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
 
   return router;
 };
