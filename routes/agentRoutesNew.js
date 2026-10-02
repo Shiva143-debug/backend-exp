@@ -6,6 +6,7 @@
 
 const express = require('express');
 const AgentService = require('../services/agentService');
+const { success, failure } = require('../utils/response');
 
 module.exports = function agentRoutes(ai, pool) {
   const router = express.Router();
@@ -16,10 +17,7 @@ module.exports = function agentRoutes(ai, pool) {
    */
   const ensureAuth = (req, res, next) => {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        action: "reply",
-        reply: "Authentication required. Please provide a valid token."
-      });
+      return failure(res, "Authentication required. Please provide a valid token.", 401);
     }
     if (!req.user.name) {
       req.user.name = req.user.full_name || "User";
@@ -51,10 +49,7 @@ module.exports = function agentRoutes(ai, pool) {
       const userName = req.user.name;
 
       if (!message || !message.trim()) {
-        return res.json({
-          action: "reply",
-          reply: "Please provide a message."
-        });
+        return success(res, "Please provide a message.", { action: "reply", reply: "Please provide a message." });
       }
 
       console.log(`\n[Agent] New request from user ${userId}: "${message}"`);
@@ -67,10 +62,7 @@ module.exports = function agentRoutes(ai, pool) {
       // Step 2: Execute based on action type
       if (llmResponse.action === "reply") {
         // Simple text reply from LLM
-        return res.json({
-          action: "reply",
-          reply: llmResponse.reply
-        });
+        return success(res, "Success", { action: "reply", reply: llmResponse.reply });
       }
 
       if (llmResponse.action === "need_data") {
@@ -80,10 +72,7 @@ module.exports = function agentRoutes(ai, pool) {
 
         const result = await agentService.executeNeedData(call, params || {}, userId);
 
-        return res.json({
-          action: "reply",
-          reply: result
-        });
+        return success(res, "Success", { action: "reply", reply: result });
       }
 
       if (llmResponse.action === "addEntry") {
@@ -93,10 +82,7 @@ module.exports = function agentRoutes(ai, pool) {
 
         const result = await agentService.executeAddEntry(entry, userId);
 
-        return res.json({
-          action: "reply",
-          reply: result
-        });
+        return success(res, "Success", { action: "reply", reply: result });
       }
 
       if (llmResponse.action === "updateEntry") {
@@ -106,10 +92,7 @@ module.exports = function agentRoutes(ai, pool) {
 
         const result = await agentService.executeUpdateEntry(id, updates, userId, type);
 
-        return res.json({
-          action: "reply",
-          reply: result
-        });
+        return success(res, "Success", { action: "reply", reply: result });
       }
 
       if (llmResponse.action === "deleteEntry") {
@@ -119,29 +102,20 @@ module.exports = function agentRoutes(ai, pool) {
 
         const result = await agentService.executeDeleteEntry(id, userId, type);
 
-        return res.json({
-          action: "reply",
-          reply: result
-        });
+        return success(res, "Success", { action: "reply", reply: result });
       }
 
       if (llmResponse.action === "navigate") {
         // Navigation action - pass to frontend
-        return res.json(llmResponse);
+        return success(res, "Success", llmResponse);
       }
 
       // Unknown action
-      return res.json({
-        action: "reply",
-        reply: "Hi Welcome to Expense Tracker! How can I assist you today?"
-      });
+      return success(res, "Success", { action: "reply", reply: "Hi Welcome to Expense Tracker! How can I assist you today?" });
 
     } catch (err) {
       console.error("[Agent] Unhandled Error:", err);
-      return res.status(500).json({
-        action: "reply",
-        reply: "Sorry, something went wrong. Please try again."
-      });
+      return failure(res, "Sorry, something went wrong. Please try again.", 500);
     }
   });
 
@@ -149,7 +123,7 @@ module.exports = function agentRoutes(ai, pool) {
    * Health Check Endpoint
    */
   router.get("/agent/health", (req, res) => {
-    res.json({ status: "OK", message: "Agent service is running" });
+    success(res, "Agent service is running", { status: "OK" });
   });
 
   return router;

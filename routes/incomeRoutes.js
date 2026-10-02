@@ -1,26 +1,27 @@
 const express = require('express');
+const { success, failure } = require('../utils/response');
 
 module.exports = function incomeRoutes(pool) {
   const router = express.Router();
 
   //=====================INCOME SOURCE ROUTES====================//
-  // GET DEFAULT SOURCES (income_sources table)
+  // GET Income SOURCES (income_sources table)(web ,mobile)
   router.get('/get-income-sources', (req, res) => {
     const userId = req.user.id;
-    const sql = `SELECT * FROM income_sources WHERE user_id = $1 or user_id = 0`;
+    const sql = `SELECT * FROM income_sources WHERE user_id = $1 or user_id = 0 order by id desc`;
     pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
+      if (err) return failure(res, "Failed to fetch income sources", 500);
+      return success(res, "Income sources fetched successfully", data.rows);
     });
   });
 
-  // ADD INCOME SOURCE NAME (income_sources table)(mobile app)
+  // ADD INCOME SOURCE NAME (income_sources table)(web ,mobile)
   router.post("/add-income-source", async (req, res) => {
     const { sourceName } = req.body;
     const userId = req.user.id;
 
     if (!sourceName) {
-      return res.status(400).json({ error: "sourceName is required" });
+      return failure(res, "sourceName is required", 400);
     }
 
     const normalizedName = sourceName.trim().replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
@@ -32,8 +33,7 @@ module.exports = function incomeRoutes(pool) {
       );
 
       if (dupCheck.rowCount > 0) {
-        return res.status(201).json({ message: "Income source already exists" });
-        // return res.json({ message: "Income source already exists" });
+        return failure(res, "Income source already exists", 409);
       }
 
       const result = await pool.query(
@@ -41,21 +41,21 @@ module.exports = function incomeRoutes(pool) {
         [userId, normalizedName]
       );
 
-      return res.json(result);
+      return success(res, "Income source added successfully", result.rows[0], 201);
     } catch (err) {
       console.error("Error adding income source:", err);
-      return res.status(500).json({ error: "Failed to add income source" });
+      return failure(res, "Failed to add income source", 500);
     }
   });
 
-  // UPDATE  INCOME  SOURCE(income_sources  table)(mobile app)
+  // UPDATE  INCOME  SOURCE(income_sources  table)(web ,mobile)
   router.put("/update-income-source/:sourceId", async (req, res) => {
     const { sourceId } = req.params;
     const { sourceName } = req.body;
     const userId = req.user.id;
 
     if (!sourceName) {
-      return res.status(400).json({ error: "sourceName is required" });
+      return failure(res, "sourceName is required", 400);
     }
 
     const normalizedSourceName = sourceName
@@ -69,7 +69,7 @@ module.exports = function incomeRoutes(pool) {
       const checkResult = await pool.query(checkSql, [userId, normalizedSourceName, sourceId]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(201).json({ status: 201, message: "Income source already exists" });
+        return failure(res, "Income source already exists", 409);
       }
 
       const updateSql = `
@@ -82,20 +82,17 @@ module.exports = function incomeRoutes(pool) {
       const result = await pool.query(updateSql, [normalizedSourceName, sourceId, userId]);
 
       if (result.rowCount === 0) {
-        return res.status(404).json({ error: "income Source not found" });
+        return failure(res, "income Source not found", 404);
       }
 
-      return res.status(200).json({
-        message: "income source updated successfully",
-        data: result.rows[0]
-      });
+      return success(res, "Income source updated successfully", result.rows[0]);
     } catch (err) {
       console.error('Error updating Income source:', err);
-      return res.status(500).json({ error: "Failed to update income source of income" });
+      return failure(res, "Failed to update income source of income", 500);
     }
   });
 
-  // DELETE INCOME SOURCE (income_sources table)
+  // DELETE INCOME SOURCE (income_sources table)(web ,mobile)
   router.delete('/delete-income-source/:sourceId', async (req, res) => {
     const sourceId = parseInt(req.params.sourceId);
     const userId = req.user.id;
@@ -105,33 +102,15 @@ module.exports = function incomeRoutes(pool) {
     try {
       await client.query('BEGIN');
 
-      // 1️⃣ Get source_name
-      const sourceRes = await client.query(
-        'SELECT source_name FROM income_sources WHERE id = $1 AND user_id = $2',
-        [sourceId, userId]
-      );
-
-      if (sourceRes.rowCount === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({
-          message: 'Income source not found'
-        });
-      }
-
-      const sourceName = sourceRes.rows[0].source_name;
-
       // 2️⃣ Check usage in incomes table
       const incomeRes = await client.query(
-        'SELECT 1 FROM incomes WHERE source = $1 AND user_id = $2 LIMIT 1',
-        [sourceName, userId]
+        'SELECT * FROM incomes WHERE source_id = $1 AND user_id = $2 LIMIT 1',
+        [sourceId, userId]
       );
 
       if (incomeRes.rowCount > 0) {
         await client.query('ROLLBACK');
-        return res.status(203).json({
-          status: 203,
-          message: 'Income source is used in incomes and cannot be deleted'
-        });
+        return failure(res, 'Income source is used in incomes so cannot be deleted', 409);
       }
 
       // 3️⃣ Safe to delete
@@ -142,27 +121,21 @@ module.exports = function incomeRoutes(pool) {
 
       await client.query('COMMIT');
 
-      return res.json({
-        message: 'Income source deleted successfully'
-      });
+      return success(res, 'Income source deleted successfully');
 
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('Delete income source error:', err);
 
-      return res.status(500).json({
-        message: 'Failed to delete income source'
-      });
+      return failure(res, 'Failed to delete income source', 500);
     } finally {
       client.release();
     }
   });
 
-
-
   //=====================INCOME ROUTES====================//
 
-  // GET INCOME BY MONTH AND YEAR(incomes table)(mobile app)
+  // GET INCOME BY MONTH AND YEAR(incomes table)(web ,mobile) 
   router.get('/get-income-by-month-year/:month/:year', (req, res) => {
     const userId = req.user.id;
     const month = parseInt(req.params.month);
@@ -181,12 +154,12 @@ module.exports = function incomeRoutes(pool) {
 
     //  `SELECT  * FROM incomes WHERE user_id = $1 AND month =$2 AND year =$3`;
     pool.query(sql, [userId, month, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
+      if (err) return failure(res, "Failed to fetch income", 500);
+      return success(res, "Income fetched successfully", data.rows);
     });
   });
 
-  // GET TOTAL INCOME DATA (incomes table)(mobile app)
+  // GET TOTAL INCOME DATA (incomes table)(web ,mobile)
   router.get("/get-total-income", (req, res) => {
     const userId = req.user.id;
 
@@ -204,81 +177,35 @@ module.exports = function incomeRoutes(pool) {
     pool.query(sql, [userId], (err, data) => {
       if (err) {
         console.error("Error fetching income:", err);
-        return res.status(500).json({
-          error: "Internal server error",
-        });
+        return failure(res, "Internal server error", 500);
       }
 
-      return res.json(data.rows);
+      return success(res, "Total income fetched successfully", data.rows);
     });
   });
 
-  // YEAR-WISE INCOME DATA
-  router.get('/getYearWiseData/:year', (req, res) => {
-    const userId = req.user.id;
-    const year = parseInt(req.params.year);
-
-    const sql = `
-    SELECT 
-      i.*,
-      src.source_name 
-    FROM incomes i
-    LEFT JOIN income_sources src 
-      ON src.id = i.source_id
-    WHERE i.user_id = $1  AND year = $2
-    ORDER BY i.id DESC
-  `;
-    // `SELECT  * FROM incomes WHERE user_id = $1 AND year = $2`;
-    pool.query(sql, [userId, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
-
-  // GET REPORT SOURCE (ALL)
-  router.get('/getReportSource', (req, res) => {
-    const userId = req.user.id;
-    const sql =
-      `
-    SELECT 
-      i.*,
-      src.source_name 
-    FROM incomes i
-    LEFT JOIN income_sources src 
-      ON src.id = i.source_id
-    WHERE i.user_id = $1
-    ORDER BY i.id DESC
-  `;
-
-    // `SELECT  * FROM incomes WHERE user_id = $1`;
-    pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
-
-  // ADD INCOME (incomes table)(mobile app)
+  // ADD INCOME (incomes table)(web ,mobile)
   router.post("/add-income", (req, res) => {
-    const { source, amount, date } = req.body;
+    const { sourceId, amount, date } = req.body;
     const userId = req.user.id;
     console.log("Received data:", req.body);
     const dateObject = new Date(date);
     const Month = dateObject.getMonth() + 1;
     const Year = dateObject.getFullYear();
 
-    const sql = "INSERT INTO incomes (user_id,source, amount, date,month,year) VALUES ($1,$2,$3,$4,$5,$6)";
-    const values = [userId, source, amount, date, Month, Year];
+    const sql = "INSERT INTO incomes (user_id,source_id, amount, date,month,year) VALUES ($1,$2,$3,$4,$5,$6)";
+    const values = [userId, sourceId, amount, date, Month, Year];
 
     pool.query(sql, values, (err, result) => {
-      if (err) return res.json(err);
-      return res.json(result);
+      if (err) return failure(res, "Failed to add income", 500);
+      return success(res, "Income added successfully", result.rows[0], 201);
     });
   });
 
-  // UPDATE INCOME (incomes table)(mobile app)
-  router.put("/update-income/:sourceId", (req, res) => {
-    const { sourceId } = req.params;
-    const { source, amount, date } = req.body;
+  // UPDATE INCOME (incomes table)(web ,mobile)
+  router.put("/update-income/:id", (req, res) => {
+    const { id } = req.params;
+    const { sourceId, amount, date } = req.body;
     const userId = req.user.id;
 
     const dateObject = new Date(date);
@@ -287,7 +214,7 @@ module.exports = function incomeRoutes(pool) {
 
     const sql = `
     UPDATE incomes
-    SET source = $1,
+    SET source_id = $1,
         amount = $2,
         date = $3,
         month = $4,
@@ -296,25 +223,25 @@ module.exports = function incomeRoutes(pool) {
   `;
 
     const values = [
-      source,
+      sourceId,
       amount,
       date,
       Month,
       Year,
-      sourceId,
+      id,
       userId
     ];
 
     pool.query(sql, values, (err, result) => {
       if (err) {
         console.error(err);
-        return res.status(500).json({ error: "Failed to update source" });
+        return failure(res, "Failed to update source", 500);
       }
-      return res.json({ message: "Income source updated successfully" });
+      return success(res, "Income source updated successfully");
     });
   });
 
-  // DELETE INCOME (incomes table)(mobile app)
+  // DELETE INCOME (incomes table)(web ,mobile)
   router.delete('/delete-income/:sourceId', (req, res) => {
     const sourceId = parseInt(req.params.sourceId);
     const userId = req.user.id;
@@ -323,13 +250,11 @@ module.exports = function incomeRoutes(pool) {
     pool.query(sql, [sourceId, userId], (err, data) => {
       if (err) {
         console.error(err);
-        return res.status(500).json({ message: 'Internal Server Error' });
+        return failure(res, 'Internal Server Error', 500);
       }
-      return res.json(data);
+      return success(res, 'Income deleted successfully');
     });
   });
-
-
 
   return router;
 };

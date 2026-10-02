@@ -1,19 +1,20 @@
 const express = require('express');
+const { success, failure } = require('../utils/response');
 
 module.exports = function savingsRoutes(pool) {
   const router = express.Router();
 
-  // GET ALL SAVINGS (mobile app)
+  // GET ALL SAVINGS (web ,mobile)
   router.get('/get-savings', (req, res) => {
     const userId = req.user.id;
     const sql = `SELECT * FROM savings WHERE user_id = $1 order by date desc`;
     pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
+      if (err) return failure(res, "Failed to fetch savings", 500);
+      return success(res, "Savings fetched successfully", data.rows);
     });
   });
 
-  // GET SAVINGS BY MONTH/YEAR (mobile app)
+  // GET SAVINGS BY MONTH/YEAR (web app) its not needed because which is only for getting amount
   router.get('/get-savings-by-month-year/:month/:year', (req, res) => {
     const userId = req.user.id;
     const month = parseInt(req.params.month);
@@ -21,12 +22,12 @@ module.exports = function savingsRoutes(pool) {
 
     const sql = `SELECT  * FROM savings WHERE user_id = $1 AND month =$2 AND year =$3`;
     pool.query(sql, [userId, month, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
+      if (err) return failure(res, "Failed to fetch savings", 500);
+      return success(res, "Savings fetched successfully", data.rows);
     });
   });
 
-  // ADD SAVINGS (mobile app)
+  // ADD SAVINGS (web ,mobile)
   router.post("/add-savings", (req, res) => {
     const { amount, date, note } = req.body;
     const userId = req.user.id;
@@ -38,22 +39,19 @@ module.exports = function savingsRoutes(pool) {
     const values = [userId, amount, date, note, Month, Year];
 
     pool.query(sql, values, (err, result) => {
-      if (err) return res.json(err);
-      return res.json(result);
+      if (err) return failure(res, "Failed to add savings", 500);
+      return success(res, "Savings added successfully", result.rows[0], 201);
     });
   });
 
-  // UPDATE SAVINGS(mobile app)
+  // UPDATE SAVINGS(web ,mobile)
   router.put("/update-savings/:saving_id", (req, res) => {
     const { saving_id } = req.params;
     const { amount, date, note } = req.body;
     const userId = req.user.id;
 
     if (!amount || !date) {
-      return res.status(400).json({
-        success: false,
-        message: "amount and date are required"
-      });
+      return failure(res, "amount and date are required", 400);
     }
 
     const dateObject = new Date(date);
@@ -76,28 +74,18 @@ module.exports = function savingsRoutes(pool) {
     pool.query(sql, values, (err, result) => {
       if (err) {
         console.error("Error updating savings:", err);
-        return res.status(500).json({
-          success: false,
-          message: "Internal server error"
-        });
+        return failure(res, "Internal server error", 500);
       }
 
       if (result.rowCount === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Savings record not found"
-        });
+        return failure(res, "Savings record not found", 404);
       }
 
-      return res.json({
-        success: true,
-        message: "Savings updated successfully",
-        data: result.rows[0]
-      });
+      return success(res, "Savings updated successfully", result.rows[0]);
     });
   });
 
-  // DELETE SAVINGS(mobile app)
+  // Delete SAVINGS(web ,mobile)
   router.delete('/delete-saving/:savingId', (req, res) => {
     const savingId = parseInt(req.params.savingId);
     const userId = req.user.id;
@@ -106,24 +94,11 @@ module.exports = function savingsRoutes(pool) {
     pool.query(sql, [savingId, userId], (err, data) => {
       if (err) {
         console.error(err);
-        return res.status(500).json({ message: 'Internal Server Error' });
+        return failure(res, 'Internal Server Error', 500);
       }
-      return res.json(data);
+      return success(res, 'Savings deleted successfully');
     });
   });
-
-  // YEAR-WISE SAVINGS
-  router.get('/getYearWiseSavingsData/:year', (req, res) => {
-    const userId = req.user.id;
-    const year = parseInt(req.params.year);
-
-    const sql = `SELECT * FROM savings  WHERE user_id = $1 And year= $2`;
-    pool.query(sql, [userId, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
-
 
   return router;
 };

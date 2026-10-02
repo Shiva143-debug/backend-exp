@@ -1,11 +1,12 @@
 const express = require('express');
+const { success, failure } = require('../utils/response');
 
 module.exports = function expenseRoutes(pool/*, upload*/) {
   const router = express.Router();
 
   //============================EXPENCE==================================== //
 
-  // GET ALL EXPENSES(mobile app)
+  // GET ALL EXPENSES(web, mobile)
   router.get("/get-all-expenses", (req, res) => {
     const userId = req.user.id;
 
@@ -26,18 +27,16 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     pool.query(sql, [userId], (err, data) => {
       if (err) {
         console.error("Error fetching expenses:", err);
-        return res.status(500).json({
-          error: "Internal server error"
-        });
+        return failure(res, "Internal server error", 500);
       }
 
-      return res.json(data.rows);
+      return success(res, "Expenses fetched successfully", data.rows);
     });
   });
 
-  // ADD EXPENSE(mobile app)
+  // ADD EXPENSE(web, mobile)
   router.post("/add-expense", (req, res) => {
-    const { category, expenseName, cost, pDate, description, isTaxApp, percentage, taxAmount, image } = req.body;
+    const { categoryId, expenseItemId, cost, pDate, description, isTaxApp, percentage, taxAmount, image } = req.body;
     const userId = req.user.id;
     console.log("Received expense data:", req.body);
 
@@ -45,25 +44,25 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     const month = dateObject.getMonth() + 1;
     const year = dateObject.getFullYear();
 
-    const sql = "INSERT INTO expense (category, expense_name, cost, p_date, description, is_tax_app, percentage, tax_amount, month, year,user_id,image) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11,$12)";
-    const values = [category, expenseName, cost, pDate, description, isTaxApp, percentage, taxAmount, month, year, userId, image];
+    const sql = "INSERT INTO expense (category_id, expense_item_id, cost, p_date, description, is_tax_app, percentage, tax_amount, month, year,user_id,image) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11,$12)";
+    const values = [categoryId, expenseItemId, cost, pDate, description, isTaxApp, percentage, taxAmount, month, year, userId, image];
 
     pool.query(sql, values, (err, result) => {
       if (err) {
         console.log("error", err);
-        return res.json(err);
+        return failure(res, "Failed to add expense", 500);
       }
-      return res.json(result);
+      return success(res, "Expense added successfully", result.rows[0], 201);
     });
   });
 
-  // UPDATE EXPENSE(mobile app)
+  // UPDATE EXPENSE(web , mobile)
   router.put("/update-expense/:expenseId", async (req, res) => {
     const { expenseId } = req.params;
 
     const {
-      category,
-      expenseName,
+      categoryId,
+      expenseItemId,
       cost,
       pDate,
       description,
@@ -82,8 +81,8 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
       const sql = `
       UPDATE expense
       SET
-        category = $1,
-        expense_name = $2,
+        category_id = $1,
+        expense_item_id = $2,
         cost = $3,
         p_date = $4,
         description = $5,
@@ -98,8 +97,8 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     `;
 
       const values = [
-        category,
-        expenseName,
+        categoryId,
+        expenseItemId,
         cost,
         pDate,
         description,
@@ -116,20 +115,17 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
       const result = await pool.query(sql, values);
 
       if (result.rowCount === 0) {
-        return res.status(404).json({ message: "Expense not found" });
+        return failure(res, "Expense not found", 404);
       }
 
-      res.json({
-        message: "Expense updated successfully",
-        expense: result.rows[0],
-      });
+      success(res, "Expense updated successfully", result.rows[0]);
     } catch (err) {
       console.error("Update expense error:", err);
-      res.status(500).json({ error: "Internal server error" });
+      failure(res, "Internal server error", 500);
     }
   });
 
-  // DELETE EXPENSE(mobile app)
+  // DELETE EXPENSE(web ,mobile)
   router.delete('/delete-expence/:expenseId', (req, res) => {
     const expenseId = parseInt(req.params.expenseId);
     const userId = req.user.id;
@@ -138,49 +134,47 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     pool.query(sql, [expenseId, userId], (err, data) => {
       if (err) {
         console.error(err);
-        return res.status(500).json({ message: 'Internal Server Error' });
+        return failure(res, 'Internal Server Error', 500);
       }
-      return res.json(data);
+      return success(res, 'Expense deleted successfully');
     });
   });
 
-
-//new
   //================================EXPENSE ITEM  ==================================== //
 
-
+  // get Expense items(web,mobile)
   router.get("/get-expense-items", (req, res) => {
     const userId = req.user.id;
 
     const sql = `
-    SELECT 
-      * ,
-      c.category 
-    FROM expense_items ei
-    LEFT JOIN category c 
-      ON c.id = ei.category_id
-    WHERE ei.user_id = $1 OR ei.user_id = 0
+       SELECT
+    ei.*,
+    c.category
+FROM expense_items ei
+LEFT JOIN category c
+    ON c.id = ei.category_id
+WHERE ei.user_id = $1 OR ei.user_id = 0 order by ei.id desc
   `;
 
     pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
+      if (err) return failure(res, "Failed to fetch expense items", 500);
+      return success(res, "Expense items fetched successfully", data.rows);
     });
   });
 
-
+  // get Expense items by category(web ,mobile)
   router.get("/get-expense-items-by-category", (req, res) => {
     const { categoryId } = req.query;
     const userId = req.user.id;
 
     if (!categoryId) {
-      return res.status(400).json({ error: "Invalid category" });
+      return failure(res, "Invalid category", 400);
     }
 
     const sql =
       `
     SELECT 
-      * ,
+      ei.* ,
       c.category 
     FROM expense_items ei
     LEFT JOIN category c 
@@ -192,95 +186,24 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     pool.query(sql, [categoryId, userId], (err, results) => {
       if (err) {
         console.error("Error fetching expense items:", err);
-        return res.status(500).json({ error: "Internal server error" });
+        return failure(res, "Internal server error", 500);
       }
-      res.json(results.rows);
+      success(res, "Expense items fetched successfully", results.rows);
       console.log(results);
     });
   });
 
-
-  // GET EXPENSE BY ITEM ID
-  router.get('/getExpenseCostByItemId/:itemId', (req, res) => {
-    const userId = req.user.id;
-    const itemId = req.params.itemId;
-    const sql = `
-    SELECT 
-      e.*,
-      c.category ,
-      ei.expense_name 
-    FROM expense e
-    LEFT JOIN category c
-      ON c.id = e.category_id
-    LEFT JOIN expense_items ei
-      ON ei.id = e.expense_item_id
-    WHERE e.user_id = $1 and e.id = $2
-    ORDER BY e.id DESC
-  `;
-
-    pool.query(sql, [userId, itemId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows[0]);
-    });
-  });
-
-  // YEAR-WISE EXPENSE DATA
-  router.get('/getYearWiseExpenceData/:year', (req, res) => {
-    const userId = req.user.id;
-    const year = parseInt(req.params.year);
-    const sql = `
-    SELECT 
-      e.*,
-      c.category ,
-      ei.expense_name 
-    FROM expense e
-    LEFT JOIN category c
-      ON c.id = e.category_id
-    LEFT JOIN expense_items ei
-      ON ei.id = e.expense_item_id
-    WHERE e.user_id = $1 and e.year= $2
-    ORDER BY e.id DESC
-  `;
-
-    pool.query(sql, [userId, year], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
-    });
-  });
-
-  // FILTERED SOURCE DATA (actually expense grouped by Source column)
-  router.get("/filteredSourceData", (req, res) => {
-    const month = req.query.month;
-    const year = req.query.year;
-    const userId = req.user.id;
-
-    const sql = `SELECT SUM(cost) AS totalCost FROM expense WHERE month = $1 AND year = $2 And user_id = $3 `;
-    pool.query(sql, [month, year, userId], (err, result) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: "Internal Server Error" });
-      }
-      return res.json(result.rows);
-    });
-  });
-
-
+  //ADD Expense item(web ,mobile)
   router.post("/add-expense-item", (req, res) => {
     const { categoryId, expenseName } = req.body;
     const userId = req.user.id;
 
     if (!categoryId) {
-      return res.status(400).json({
-        success: false,
-        message: "Category is required"
-      });
+      return failure(res, "Category is required", 400);
     }
 
     if (!expenseName || !String(expenseName).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Expense name is required"
-      });
+      return failure(res, "Expense name is required", 400);
     }
 
     const normalizedExpenseName = String(expenseName)
@@ -317,17 +240,11 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
         if (err) {
           console.error("Error checking existing expense name:", err);
 
-          return res.status(500).json({
-            success: false,
-            message: "Internal server error"
-          });
+          return failure(res, "Internal server error", 500);
         }
 
         if (results.rows.length > 0) {
-          return res.status(409).json({
-            success: false,
-            message: "Expense Item already exists"
-          });
+          return failure(res, "Expense Item already exists", 409);
         }
 
         pool.query(
@@ -337,33 +254,24 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
             if (err) {
               console.error("Error inserting expense name:", err);
 
-              return res.status(500).json({
-                success: false,
-                message: "Internal server error"
-              });
+              return failure(res, "Internal server error", 500);
             }
 
-            return res.status(201).json({
-              message: "Expense Item added successfully",
-              data: result.rows[0]
-            });
+            return success(res, "Expense Item added successfully", result.rows[0], 201);
           }
         );
       }
     );
   });
 
-
+  //update Expense item(web, mobile)
   router.put("/update-expense-item/:expenseItemId", async (req, res) => {
     const { expenseItemId } = req.params;
     const { newexpenseItem } = req.body;
     const userId = req.user.id;
 
     if (!newexpenseItem || !String(newexpenseItem).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "newexpenseItem is required"
-      });
+      return failure(res, "newexpenseItem is required", 400);
     }
 
     const normalizedExpenseName = String(newexpenseItem)
@@ -390,10 +298,7 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
       );
 
       if (itemRes.rowCount === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Expense item not found or user does not have permission"
-        });
+        return failure(res, "Expense item not found or user does not have permission", 404);
       }
 
       const categoryId = itemRes.rows[0].category_id;
@@ -416,10 +321,7 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
       ]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(409).json({
-          success: false,
-          message: "Expense item already exists"
-        });
+        return failure(res, "Expense item already exists", 409);
       }
 
       // 3. Update only expense_name
@@ -443,29 +345,19 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
       ]);
 
       if (result.rowCount === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Expense item not found or no permission"
-        });
+        return failure(res, "Expense item not found or no permission", 404);
       }
 
-      return res.status(200).json({
-        success: true,
-        message: "Expense item updated successfully",
-        data: result.rows[0]
-      });
+      return success(res, "Expense item updated successfully", result.rows[0]);
 
     } catch (err) {
       console.error("Error updating expense item:", err);
 
-      return res.status(500).json({
-        success: false,
-        message: "Internal server error"
-      });
+      return failure(res, "Internal server error", 500);
     }
   });
 
-
+  //Delete Expense item(web ,mobile)
   router.delete("/delete-expense-item/:expenseItemId", async (req, res) => {
     const expenseItemId = parseInt(req.params.expenseItemId);
     const userId = req.user.id;
@@ -475,32 +367,15 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
     try {
       await client.query("BEGIN");
 
-      // 1️⃣ Get expense_name
-      const itemRes = await client.query(
-        "SELECT expense_name FROM expense_items WHERE id = $1 AND user_id = $2",
-        [expenseItemId, userId]
-      );
-
-      if (itemRes.rowCount === 0) {
-        await client.query("ROLLBACK");
-        return res.status(404).json({
-          message: "Expense item not found"
-        });
-      }
-
-      const expenseName = itemRes.rows[0].expense_name;
-
       // 2️⃣ Check usage in expense table
       const expenseRes = await client.query(
-        "SELECT 1 FROM expense WHERE expense_name = $1 AND user_id = $2 LIMIT 1",
-        [expenseName, userId]
+        "SELECT 1 FROM expense WHERE expense_item_id = $1 AND user_id = $2 LIMIT 1",
+        [expenseItemId, userId]
       );
 
       if (expenseRes.rowCount > 0) {
         await client.query("ROLLBACK");
-        return res.status(409).json({
-          message: "Expense item is used in expenses and cannot be deleted"
-        });
+        return failure(res, "Expense item is used in expenses and cannot be deleted", 409);
       }
 
       // 3️⃣ Safe to delete
@@ -511,17 +386,13 @@ module.exports = function expenseRoutes(pool/*, upload*/) {
 
       await client.query("COMMIT");
 
-      return res.json({
-        message: "Expense item deleted successfully"
-      });
+      return success(res, "Expense item deleted successfully");
 
     } catch (err) {
       await client.query("ROLLBACK");
       console.error("Delete expense item error:", err);
 
-      return res.status(500).json({
-        message: "Failed to delete expense item"
-      });
+      return failure(res, "Failed to delete expense item", 500);
     } finally {
       client.release();
     }

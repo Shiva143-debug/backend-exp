@@ -1,21 +1,22 @@
+require('dotenv').config();
+
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors')
-const bodyParser = require('body-parser');
 const multer = require('multer')
-const upload = multer({ dest: 'uploads/' });
-require('dotenv').config();
-// const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { GoogleGenAI } = require('@google/genai');
-const appInfo = require('./appInfo.json');
 const { generateToken, authenticateToken } = require('./middleware/auth');
 const camelCaseResponse = require('./middleware/camelCase');
-const { sendMail } = require('./services/emailService');
+const upload = multer({ dest: 'uploads/' });
+const bodyParser = require('body-parser');
+const appInfo = require('./appInfo.json');
 const incomeRoutes = require('./routes/incomeRoutes');
 const savingsRoutes = require('./routes/savingsRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const agentRoutesNew = require('./routes/agentRoutesNew');
 const categoryRoutes = require("./routes/categoryRoutes");
+const { success, failure } = require('./utils/response');
+const { sendMail } = require('./services/emailService');
 
 
 const app = express()
@@ -27,8 +28,8 @@ app.use(camelCaseResponse);
 
 const isLocalDB = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DB_SSL === 'false' || isLocalDB ? false : { rejectUnauthorized: false },
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DB_SSL === 'false' || isLocalDB ? false : { rejectUnauthorized: false },
 });
 
 const ai = new GoogleGenAI({
@@ -37,8 +38,7 @@ const ai = new GoogleGenAI({
 
 console.log("Gemini API Key being used:", process.env.GEMINI_API_KEY ? "✅ Loaded" : "❌ Missing");
 
-
-// ── Public routes (no auth required) ──
+// Register User (web ,mobile)
 app.post("/register", async (req, res) => {
     const { fullName, email, mobileNo, address } = req.body;
     const password = Math.floor(100000 + Math.random() * 900000).toString();
@@ -51,7 +51,7 @@ app.post("/register", async (req, res) => {
             [email]
         );
         if (dupCheck.rowCount > 0)
-            return res.status(400).json({ success: false, message: "Email exists" });
+            return failure(res, "Email exists", 400);
 
         await client.query("BEGIN");
         await client.query(
@@ -60,30 +60,25 @@ app.post("/register", async (req, res) => {
         );
 
         // Send email via OAuth2
-        await sendMail(
-            email,
-            "Your Password for Registration",
-            `Dear ${fullName}, your password is ${password}`
-        );
+        // await sendMail(
+        //     email,
+        //     "Your Password for Registration",
+        //     `Dear ${fullName}, your password is ${password}`
+        // );
 
         await client.query("COMMIT");
 
-        return res.json({
-            success: true,
-            message: "Registration successful. Password sent to email.",
-        });
+        return success(res, "Registration successful. Password sent to email.");
     } catch (err) {
         await client.query("ROLLBACK");
         console.error("Register error:", err);
-        return res
-            .status(500)
-            .json({ success: false, message: "Registration failed" });
+        return failure(res, "Registration failed", 500);
     } finally {
         client.release();
     }
 });
 
-
+// Login User (web ,mobile)
 app.post("/login", (req, res) => {
     const { loginEmail, password } = req.body;
     console.log("Received login request:", req.body);
@@ -96,14 +91,14 @@ app.post("/login", (req, res) => {
     pool.query(sql, values, (err, result) => {
         if (err) {
             console.error("Error executing query:", err);
-            return res.status(500).json({ error: "Internal server error" });
+            return failure(res, "Internal server error", 500);
         }
 
         // console.log(result)
         console.log(result.rows.length)
         if (!result || result.rows.length === 0) {
             // No matching user found
-            return res.status(401).json({ error: "Invalid email or password", message: "Login Failure" });
+            return failure(res, "Invalid email or password", 401);
         }
 
         const user = result.rows[0];
@@ -111,20 +106,134 @@ app.post("/login", (req, res) => {
         console.log(password)
         if (user.password !== password) {
             // Password doesn't match
-            return res.status(401).json({ error: "Invalid email or password", message: "Login Failure" });
+            return failure(res, "Invalid email or password", 401);
         }
 
         // Login successful - generate JWT token
         const token = generateToken(user);
-        return res.status(200).json({
-          message: "Login successful",
-          result: user,
-          token: token
-        });
+        return success(res, "Login successful", { user, token });
 
     });
 });
 
+// Stats (web ,mobile)
+app.get('/get-stats/:month/:year', authenticateToken, async (req, res) => {
+    const month = parseInt(req.params.month);
+    const year = parseInt(req.params.year);
+
+    if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 1) {
+        return failure(res, 'month and year are required and must be valid', 400);
+    }
+
+    const userId = req.user.id;
+    const sql = `
+        SELECT
+            COALESCE((
+                SELECT SUM(amount)
+                FROM incomes
+                WHERE user_id = $1 AND month = $2 AND year = $3
+            ), 0) AS income_amount,
+            COALESCE((
+                SELECT SUM(cost)
+                FROM expense
+                WHERE user_id = $1 AND month = $2 AND year = $3
+            ), 0) AS expense_amount,
+            COALESCE((
+                SELECT SUM(tax_amount)
+                FROM expense
+                WHERE user_id = $1 AND month = $2 AND year = $3
+            ), 0) AS tax_amount,
+            COALESCE((
+                SELECT COUNT(*)
+                FROM expense
+                WHERE user_id = $1 AND month = $2 AND year = $3
+            ), 0) AS expense_count,
+            COALESCE((
+                SELECT COUNT(DISTINCT COALESCE(c.category, 'Uncategorized'))
+                FROM expense e
+                LEFT JOIN category c ON c.id = e.category_id
+                WHERE e.user_id = $1 AND e.month = $2 AND e.year = $3
+            ), 0) AS category_count,
+            COALESCE((
+                SELECT SUM(amount)
+                FROM savings
+                WHERE user_id = $1 AND month = $2 AND year = $3
+            ), 0) AS savings_amount
+    `;
+
+    try {
+        const result = await pool.query(sql, [userId, month, year]);
+
+        return success(res, "Stats fetched successfully", result.rows[0]);
+    } catch (err) {
+        console.error("Error fetching stats:", err);
+        return failure(res, "Failed to fetch stats", 500);
+    }
+});
+
+//stats for year (web)
+app.get('/get-stats-year/:year', authenticateToken, async (req, res) => {
+    const year = Number(req.params.year);
+
+    if (!Number.isInteger(year) || year < 1) {
+        return failure(res, 'year is required and must be valid', 400);
+    }
+
+    const userId = req.user.id;
+    const sql = `
+        SELECT
+            COALESCE((
+                SELECT SUM(amount)
+                FROM incomes
+                WHERE user_id = $1 AND year = $2
+            ), 0) AS income_amount,
+            COALESCE((
+                SELECT SUM(cost)
+                FROM expense
+                WHERE user_id = $1 AND year = $2
+            ), 0) AS expense_amount,
+            COALESCE((
+                SELECT SUM(tax_amount)
+                FROM expense
+                WHERE user_id = $1 AND year = $2
+            ), 0) AS tax_amount,
+            COALESCE((
+                SELECT COUNT(*)
+                FROM expense
+                WHERE user_id = $1 AND year = $2
+            ), 0) AS expense_count,
+            COALESCE((
+                SELECT COUNT(DISTINCT COALESCE(c.category, 'Uncategorized'))
+                FROM expense e
+                LEFT JOIN category c ON c.id = e.category_id
+                WHERE e.user_id = $1 AND e.year = $2
+            ), 0) AS category_count,
+            COALESCE((
+                SELECT SUM(amount)
+                FROM savings
+                WHERE user_id = $1 AND year = $2
+            ), 0) AS savings_amount
+    `;
+
+    try {
+        const result = await pool.query(sql, [userId, year]);
+
+        return success(res, "Yearly stats fetched successfully", result.rows[0]);
+    } catch (err) {
+        console.error("Error fetching yearly stats:", err);
+        return failure(res, "Failed to fetch yearly stats", 500);
+    }
+});
+
+
+
+
+
+
+
+
+
+// Chatbot (not implemetd yet in web,mobile)
 app.post('/chat', async (req, res) => {
     const { prompt } = req.body;
     console.log('Received prompt:', prompt);
@@ -170,19 +279,20 @@ app.post('/chat', async (req, res) => {
         const text = response.text();
 
         console.log('Response from Gemini:', text);
-        res.send({ message: text });
+        success(res, "Success", { message: text });
 
     } catch (error) {
         if (error.status === 429) {
-            res.status(429).send("Rate limit hit. Try again later or upgrade your Gemini API plan.");
+            failure(res, "Rate limit hit. Try again later or upgrade your Gemini API plan.", 429);
         } else {
-            res.status(500).send("Something went wrong: " + error.message);
+            failure(res, "Something went wrong: " + error.message, 500);
         }
         // console.error('Error during Gemini API call:', error);
         // res.status(500).send({ error: 'Something went wrong with Gemini API.' });
     }
 });
 
+//profile screen removed in both web,mobile, so not needed
 app.post('/uploadProfilePicture', authenticateToken, (req, res) => {
 
     const { profile_picture_url } = req.body;
@@ -194,14 +304,14 @@ app.post('/uploadProfilePicture', authenticateToken, (req, res) => {
     pool.query('UPDATE register SET profile_picture_url = $1 WHERE id = $2', [profile_picture_url, userId], (err, result) => {
         if (err) {
             console.error('Error updating profile picture URL in the database:', err);
-            res.sendStatus(500);
+            failure(res, "Failed to update profile picture", 500);
         } else {
             console.log('Profile picture URL updated in the database');
-            res.sendStatus(200);
+            success(res, "Profile picture updated successfully");
         }
     });
 });
-
+//profile screen removed in both web,mobile, so not needed
 app.get('/getPhoto', authenticateToken, (req, res) => {
 
     const userId = req.user.id;
@@ -210,17 +320,18 @@ app.get('/getPhoto', authenticateToken, (req, res) => {
     pool.query(sql, [userId], (err, data) => {
         // console.log(err);
         // console.log(data);
-        if (err) return res.json(err);
-        return res.json(data.rows)
+        if (err) return failure(res, "Failed to fetch photo", 500);
+        return success(res, "Photo fetched successfully", data.rows);
     })
 })
 
+//update password feature is not implemented in both web,mobile.
 app.put('/updateUserPassword', authenticateToken, (req, res) => {
     const { email, updatedpassword, updatedConfirmpassword } = req.body;
 
     // Validate inputs
     if (!email || !updatedpassword) {
-        return res.status(400).json({ error: 'Email and updated password are required' });
+        return failure(res, 'Email and updated password are required', 400);
     }
 
     // Update the user's password in the database
@@ -228,18 +339,19 @@ app.put('/updateUserPassword', authenticateToken, (req, res) => {
     pool.query(sql, [updatedpassword, email], (err, result) => {
         if (err) {
             console.error("Error updating password:", err);
-            return res.status(500).json({ error: "An error occurred while updating password" });
+            return failure(res, "An error occurred while updating password", 500);
         }
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: "User not found" });
+            return failure(res, "User not found", 404);
         }
 
-        return res.status(200).json({ message: "Password updated successfully" });
+        return success(res, "Password updated successfully");
 
     });
 });
 
+//swio APP
 app.post('/create-payment', async (req, res) => {
     const { name, amount, transaction } = req.body;
 
@@ -261,24 +373,26 @@ app.post('/create-payment', async (req, res) => {
         pool.query(sql, values, (err, result) => {
             if (err) {
                 console.error("Error inserting data into payment table:", err);
-                return res.status(500).json({ error: "Error inserting data into payment table" });
+                return failure(res, "Error inserting data into payment table", 500);
             }
             console.log("Data inserted successfully into payment table");
-            return res.json({ success: true, message: "Data inserted successfully" });
+            return success(res, "Data inserted successfully");
         });
     } catch (error) {
         console.error("Error creating PaymentIntent:", error);
-        return res.status(500).json({ error: "Error creating PaymentIntent" });
+        return failure(res, "Error creating PaymentIntent", 500);
     }
 });
 
+//swio APP
 app.get('/getpayment', (req, res) => {
     const sql = "SELECT  * FROM payment";
     pool.query(sql, (err, data) => {
-        if (err) return res.json(err);
-        return res.json(data.rows);
+        if (err) return failure(res, "Failed to fetch payments", 500);
+        return success(res, "Payments fetched successfully", data.rows);
     });
 });
+
 
 // ── Protected routes (require JWT) ──
 app.use('/', authenticateToken, incomeRoutes(pool));

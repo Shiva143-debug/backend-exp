@@ -1,19 +1,20 @@
 const express = require("express");
+const { success, failure } = require("../utils/response");
 
 module.exports = function categoryRoutes(pool) {
   const router = express.Router();
 
-  //GET ALL CATEGORIES(mobile app)
+  //GET ALL CATEGORIES( web , mobile)
   router.get("/categories", (req, res) => {
     const userId = req.user.id;
-    const sql = `SELECT * FROM category WHERE user_id = $1 or user_id =0 `;
+    const sql = `SELECT * FROM category WHERE user_id = $1 or user_id =0 order by id desc`;
     pool.query(sql, [userId], (err, data) => {
-      if (err) return res.json(err);
-      return res.json(data.rows);
+      if (err) return failure(res, "Failed to fetch categories", 500);
+      return success(res, "Categories fetched successfully", data.rows);
     });
   });
 
-  //ADD CATEGORY(mobile app)
+  //ADD CATEGORY(web , mobile)
   router.post("/add-category", async (req, res) => {
     const { category } = req.body;
     const userId = req.user.id;
@@ -21,9 +22,7 @@ module.exports = function categoryRoutes(pool) {
     const trimmedCategory = category.trim().replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
     if (!trimmedCategory) {
-      return res.status(400).json({
-        message: "category is required"
-      });
+      return failure(res, "category is required", 400);
     }
 
     try {
@@ -35,7 +34,7 @@ module.exports = function categoryRoutes(pool) {
       const checkResult = await pool.query(checkSql, [userId, trimmedCategory]);
 
       if (checkResult.rowCount > 0) {
-        return res.status(201).json({ message: "Category already exists" });
+        return failure(res, "Category already exists", 409);
       }
 
       const insertSql = `
@@ -46,20 +45,15 @@ module.exports = function categoryRoutes(pool) {
 
       const insertResult = await pool.query(insertSql, [userId, trimmedCategory]);
 
-      return res.json({
-        message: "Category added successfully",
-        data: insertResult.rows[0]
-      });
+      return success(res, "Category added successfully", insertResult.rows[0], 201);
 
     } catch (error) {
       console.error("Error adding category:", error);
-      return res.status(500).json({
-        message: "Internal server error"
-      });
+      return failure(res, "Internal server error", 500);
     }
   });
 
-  // UPDATE CATEGORY (mobile app)
+  // UPDATE CATEGORY (web , mobile)
   router.put("/update-category/:categoryId", async (req, res) => {
     const { categoryId } = req.params;
     const { newCategory } = req.body;
@@ -69,18 +63,12 @@ module.exports = function categoryRoutes(pool) {
     const categoryIdNumber = Number(categoryId);
 
     if (!Number.isInteger(categoryIdNumber)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid categoryId"
-      });
+      return failure(res, "Invalid categoryId", 400);
     }
 
     // Validate category name
     if (!newCategory || !String(newCategory).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "newCategory is required"
-      });
+      return failure(res, "newCategory is required", 400);
     }
 
     // Normalize category name
@@ -96,10 +84,7 @@ module.exports = function categoryRoutes(pool) {
       .join("");
 
     if (!normalizedNewCategory) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid category name"
-      });
+      return failure(res, "Invalid category name", 400);
     }
 
     const client = await pool.connect();
@@ -125,10 +110,7 @@ module.exports = function categoryRoutes(pool) {
       if (checkResult.rowCount > 0) {
         await client.query("ROLLBACK");
 
-        return res.status(409).json({
-          success: false,
-          message: "Category already exists"
-        });
+        return failure(res, "Category already exists", 409);
       }
 
       // Update only category table
@@ -149,38 +131,26 @@ module.exports = function categoryRoutes(pool) {
       if (categoryResult.rowCount === 0) {
         await client.query("ROLLBACK");
 
-        return res.status(404).json({
-          success: false,
-          message: "Category not found or no permission"
-        });
+        return failure(res, "Category not found or no permission", 404);
       }
 
       await client.query("COMMIT");
 
-      return res.status(200).json({
-        success: true,
-        message: "Category updated successfully",
-        updatedCategory: categoryResult.rows[0]
-      });
+      return success(res, "Category updated successfully", categoryResult.rows[0]);
 
     } catch (error) {
       await client.query("ROLLBACK");
 
       console.error("Error updating category:", error);
 
-      return res.status(500).json({
-        success: false,
-        message: "Internal server error"
-      });
+      return failure(res, "Internal server error", 500);
 
     } finally {
       client.release();
     }
   });
 
-
-  //testing pending
-  // DELETE CATEGORY (mobile app)
+  // DELETE CATEGORY (web ,mobile)
   router.delete("/delete-category/:categoryId", async (req, res) => {
     const categoryId = parseInt(req.params.categoryId);
     const userId = req.user.id;
@@ -190,43 +160,26 @@ module.exports = function categoryRoutes(pool) {
     try {
       await client.query("BEGIN");
 
-      // 1️⃣ Check category exists
-      const categoryRes = await client.query(
-        "SELECT category FROM category WHERE id = $1 AND user_id = $2",
-        [categoryId, userId]
-      );
-
-      if (categoryRes.rowCount === 0) {
-        await client.query("ROLLBACK");
-        return res.status(404).json({ message: "Category not found" });
-      }
-
-      const categoryName = categoryRes.rows[0].category;
-
       // 2️⃣ Check usage in expense_items
       const expenseItemRes = await client.query(
-        "SELECT 1 FROM expense_items WHERE category = $1 AND user_id = $2 LIMIT 1",
-        [categoryName, userId]
+        "SELECT 1 FROM expense_items WHERE category_id = $1 AND user_id = $2 LIMIT 1",
+        [categoryId, userId]
       );
 
       if (expenseItemRes.rowCount > 0) {
         await client.query("ROLLBACK");
-        return res.status(409).json({
-          message: "Category is used in expense items and cannot be deleted"
-        });
+        return failure(res, "Category is used in expense items so cannot be deleted", 409);
       }
 
       // 3️⃣ Check usage in expense table
       const expenseRes = await client.query(
-        "SELECT 1 FROM expense WHERE category = $1 AND user_id = $2 LIMIT 1",
-        [categoryName, userId]
+        "SELECT 1 FROM expense WHERE category_id = $1 AND user_id = $2 LIMIT 1",
+        [categoryId, userId]
       );
 
       if (expenseRes.rowCount > 0) {
         await client.query("ROLLBACK");
-        return res.status(409).json({
-          message: "Category is used in expenses and cannot be deleted"
-        });
+        return failure(res, "Category is used in expenses and cannot be deleted", 409);
       }
 
       // 4️⃣ Safe to delete
@@ -237,22 +190,17 @@ module.exports = function categoryRoutes(pool) {
 
       await client.query("COMMIT");
 
-      return res.json({
-        message: "Category deleted successfully"
-      });
+      return success(res, "Category deleted successfully");
 
     } catch (err) {
       await client.query("ROLLBACK");
       console.error("Delete category error:", err);
 
-      return res.status(500).json({
-        message: "Failed to delete category"
-      });
+      return failure(res, "Failed to delete category", 500);
     } finally {
       client.release();
     }
   });
-
 
   return router;
 };

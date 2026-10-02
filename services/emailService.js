@@ -1,10 +1,23 @@
 const { Resend } = require('resend');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resend;
+
+function getResendClient() {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey || apiKey.toLowerCase().includes('your-')) {
+    throw new Error('RESEND_API_KEY is not configured with a valid Resend API key');
+  }
+
+  if (!resend) {
+    resend = new Resend(apiKey);
+  }
+
+  return resend;
+}
 
 async function sendMail(to, subject, text) {
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await getResendClient().emails.send({
       from: process.env.EMAIL_FROM,
       to,
       subject,
